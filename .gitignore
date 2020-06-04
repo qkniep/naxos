@@ -1274,3 +1274,4 @@ venv/Scripts/unicodedata.pyd
 venv/Scripts/vcruntime140.dll
 venv/Scripts/winsound.pyd
 .vscode/settings.json
+__pycache__/network.cpython-37.pyc
