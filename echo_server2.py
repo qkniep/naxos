@@ -2,6 +2,7 @@ import logging as log
 import tkinter as tk
 
 from network import NetworkThread
+import util
 
 VERSION = 0.1
 log.basicConfig(level=log.DEBUG, filename='debug.log')
@@ -9,8 +10,9 @@ log.basicConfig(level=log.DEBUG, filename='debug.log')
 if __name__ == "__main__":  # called as script, not as module
     
     def start():
-        global nt
-        nt = NetworkThread(hostname_entry.get(), int(port_entry.get()))
+        global nt, queue
+        queue = util.PollableQueue()
+        nt = NetworkThread(queue, hostname_entry.get(), int(port_entry.get()))
         nt.start()
     def stop():
         global nt
@@ -27,6 +29,7 @@ if __name__ == "__main__":  # called as script, not as module
     root=tk.Tk()
     root.protocol("WM_DELETE_WINDOW", on_close)
     nt = None
+    queue = None
 
     frame=tk.Frame(root,width=500,height=450)
 

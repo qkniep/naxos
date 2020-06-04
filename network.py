@@ -13,15 +13,26 @@ class NetworkThread(threading.Thread):
     DEFAULT_HOST = '127.0.0.1'  # Standard loopback interface address (localhost)
     DEFAULT_PORT = 65432        # Port to listen on (non-privileged ports are > 1023)
 
-    def __init__(self, host=DEFAULT_HOST, port=DEFAULT_PORT):
+    def __init__(self, queue, host=DEFAULT_HOST, port=DEFAULT_PORT):
         threading.Thread.__init__(self)
-        self.running = True
-        self.done = False
+
+        # gui thread communication
+        self.queue = queue
+
+        # listening socket
         self.host = host
         self.port = port
         self.lsock = None
+
+        # select wrapper class
         self.sel = None
+
+        # mapping ident -> Connection object
         self.connections = {}
+
+        # flags
+        self.running = True
+        self.done = False
 
     def set_connection_pair(self, host, port):
         self.host = host
@@ -29,32 +40,41 @@ class NetworkThread(threading.Thread):
 
     def run(self):
         print("Starting server on (%s, %s)" % (self.host, self.port))
+
+        # create selector object, listening socket
         self.sel = selectors.DefaultSelector()
         self.lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.lsock.bind((self.host, self.port))
         self.lsock.listen()
         self.lsock.setblocking(False)
-        self.sel.register(self.lsock, selectors.EVENT_READ, data=None)
-        log.debug('listening on (%s, %s)' % (self.host, self.port))
 
+        # register listening socket and comm. queue in select
+        self.sel.register(self.lsock, selectors.EVENT_READ, data=None)
+        self.sel.register(self.queue, selectors.EVENT_READ)
+
+        log.debug('listening on (%s, %s)' % (self.host, self.port))
         while self.running:
             events = self.sel.select(timeout=self.TIMEOUT)
             for key, mask in events:
+                if key.fileobj is self.queue:
+                    #  handle gui messages here
+                    continue
+
                 if key.data is None:
                     self.accept_wrapper(key.fileobj)
                 else:
                     self.service_connection(key, mask)
-        self.lsock.close()
-        self.sel.close()
-        self.reset()
         print("Stopping server")
+        self.reset()
 
     def reset(self):
-        self.lsock = None
-        self.sel = None
-        for key, (sock, _) in self.connections.items():
+        self.lsock.close()
+        self.sel.close()
+        for _, (sock, _) in self.connections.items():  # close all sockets
             sock.close()
         self.connections = {}
+        self.lsock = None
+        self.sel = None
         self.done = True
 
     def is_done(self):
@@ -84,7 +104,6 @@ class NetworkThread(threading.Thread):
         sock = key.fileobj
         data = key.data
         ident = util.get_key(sock)
-        # connection = self.connections[ident]
         connection = self.get_connection(ident)
         if mask & selectors.EVENT_READ:
             recv_data = sock.recv(1024)  # Should be ready to read
