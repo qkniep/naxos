@@ -16,6 +16,7 @@ class NetworkThread(threading.Thread):
     def __init__(self, host=DEFAULT_HOST, port=DEFAULT_PORT):
         threading.Thread.__init__(self)
         self.running = True
+        self.done = False
         self.host = host
         self.port = port
         self.lsock = None
@@ -52,6 +53,10 @@ class NetworkThread(threading.Thread):
         self.lsock = None
         self.sel = None
         self.connections = {}
+        self.done = True
+
+    def is_done(self):
+        return self.done
 
     def stop(self):
         self.running = False

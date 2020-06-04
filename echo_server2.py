@@ -20,6 +20,8 @@ if __name__ == "__main__":  # called as script, not as module
     def on_close():
         if nt is not None:
             nt.stop()
+        while not nt.is_done():
+            pass
         root.destroy()
     
     root=tk.Tk()
