@@ -52,6 +52,8 @@ class NetworkThread(threading.Thread):
     def reset(self):
         self.lsock = None
         self.sel = None
+        for key, (sock, _) in self.connections.items():
+            sock.close()
         self.connections = {}
         self.done = True
 
@@ -60,6 +62,12 @@ class NetworkThread(threading.Thread):
 
     def stop(self):
         self.running = False
+
+    def get_connection(self, ident):
+        return self.connections[ident][1]
+
+    def get_socket(self, ident):
+        return self.connections[ident][0]
 
     def accept_wrapper(self, sock):
         conn, addr = sock.accept()  # Should be ready to read
@@ -70,13 +78,14 @@ class NetworkThread(threading.Thread):
         self.sel.register(conn, events, data=data)
 
         ident = util.get_key(conn)
-        self.connections[ident] = Connection(self.connections, ident, conn)
+        self.connections[ident] = (conn, Connection(self.connections, ident))
 
     def service_connection(self, key, mask):
         sock = key.fileobj
         data = key.data
         ident = util.get_key(sock)
-        connection = self.connections[ident]
+        # connection = self.connections[ident]
+        connection = self.get_connection(ident)
         if mask & selectors.EVENT_READ:
             recv_data = sock.recv(1024)  # Should be ready to read
             if recv_data:

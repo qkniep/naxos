@@ -1,17 +1,16 @@
 import util
+from message import Message
 
 class Connection:
     
-    def __init__(self, connections, identifier, sock):
+    def __init__(self, connections, identifier):
         print("Connection %s created." % identifier)
         self.id = identifier
         self.buf = b''
         self.out = b''
         self.connections = connections
-        self.sock = sock
 
     def handle_data(self, data):
-        print("Received data: " % data)
         if util.DELIMITER in data:  # message ends here
             splitted = data.split(util.DELIMITER)  # it could happen that we receive multiple messages in one chunk
             for i, msg in enumerate(splitted):
@@ -24,19 +23,19 @@ class Connection:
             self.buf += data
 
     def parse_buffer(self):
-        print("PARSING BUFFER")
         message = util.decode_data(self.buf)
-        self.handle_message(message)
+        self.handle_message(Message.deserialize(message))
     
     def reset_buffer(self):
         self.buf = b''
 
     def handle_message(self, msg):
+        print("--- Handle message: ---")
         print(msg)
         self.send(msg)
 
     def send(self, msg):
-        self.out += util.encode_data(msg) + util.DELIMITER
+        self.out += util.encode_data(msg.serialize()) + util.DELIMITER
 
     def has_data(self):
         return self.out != b''
