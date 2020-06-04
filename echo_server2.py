@@ -9,11 +9,10 @@ from util import *
 from connection import Connection
 
 
-# MODE = "gui"  # choose mode. gui shows a tk gui, text uses hard coded config.
 VERSION = 0.1
 log.basicConfig(level=log.DEBUG, filename='debug.log')
 
-
+TIMEOUT = 5.0
 DEFAULT_HOST = '127.0.0.1'  # Standard loopback interface address (localhost)
 DEFAULT_PORT = 65432        # Port to listen on (non-privileged ports are > 1023)
 RUNNING = True
@@ -34,13 +33,10 @@ def service_connection(sel, key, mask):
     sock = key.fileobj
     data = key.data
     ident = get_key(sock)
-    # log.debug("Key: %s" % ident)
     connection = CONN[ident]
     if mask & selectors.EVENT_READ:
         recv_data = sock.recv(1024)  # Should be ready to read
         if recv_data:
-            # data.outb += recv_data
-            print(recv_data)
             connection.handle_data(recv_data)
         else:  # connection closed
             log.debug('closing connection to %s' % str(data.addr))
@@ -48,10 +44,6 @@ def service_connection(sel, key, mask):
             sock.close()
             del CONN[ident]
     if mask & selectors.EVENT_WRITE:
-        # if data.outb:
-        #     print('echoing', repr(data.outb), 'to', data.addr)
-        #     sent = sock.send(data.outb)  # Should be ready to write
-        #     data.outb = data.outb[sent:]
         if connection.has_data():
             log.debug('echoing %s to %s' % (repr(connection.out), data.addr))
             sent = sock.send(connection.out)  # Should be ready to write
@@ -67,7 +59,7 @@ def networking(host, port):
     lsock.setblocking(False)
     sel.register(lsock, selectors.EVENT_READ, data=None)
     while RUNNING:
-        events = sel.select(timeout=None)
+        events = sel.select(timeout=TIMEOUT)
         for key, mask in events:
             if key.data is None:
                 accept_wrapper(sel, key.fileobj)
