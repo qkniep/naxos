@@ -5,6 +5,7 @@ import types
 import logging as log
 
 import util
+from message import Message
 from connection import Connection
 
 
@@ -58,14 +59,36 @@ class NetworkThread(threading.Thread):
             for key, mask in events:
                 if key.fileobj is self.queue:
                     #  handle gui messages here
+                    self.handle_queue()
                     continue
 
-                if key.data is None:
+                if key.fileobj is self.lsock:
                     self.accept_wrapper(key.fileobj)
                 else:
                     self.service_connection(key, mask)
         print("Stopping server")
         self.reset()
+
+    def handle_queue(self):
+        cmd, payload = self.queue.get()
+        if cmd == "connect":
+            host = payload["host"]
+            port = payload["port"]
+            print("Try to connect to (%s, %s)" % (host, port))
+            data = types.SimpleNamespace(addr=(host, port), inb=b'', outb=b'')
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((host, port))
+            events = selectors.EVENT_READ | selectors.EVENT_WRITE
+            self.sel.register(sock, events, data=data)
+
+            ident = util.get_key(sock)
+            self.connections[ident] = (sock, Connection(self.connections, ident))
+            self.get_connection(ident).send(Message({
+                "content": "ping"
+            }))
+        else:
+            print("Unknown command %s" % cmd)
+
 
     def reset(self):
         self.lsock.close()
