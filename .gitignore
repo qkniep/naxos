@@ -1,3 +1,4 @@
+venv/
 __pycache__/connection.cpython-37.pyc
 __pycache__/util.cpython-37.pyc
 debug.log
@@ -1276,3 +1277,8 @@ venv/Scripts/winsound.pyd
 .vscode/settings.json
 __pycache__/network.cpython-37.pyc
 __pycache__/message.cpython-37.pyc
+.idea/misc.xml
+.idea/modules.xml
+.idea/Naxos.iml
+.idea/vcs.xml
+.idea/workspace.xml
