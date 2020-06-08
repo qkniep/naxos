@@ -75,7 +75,9 @@ if __name__ == "__main__":  # called as script, not as module
     port_connect_label.grid(row=1,sticky=tk.E)
 
     hostname_connect_entry=tk.Entry(frame2)
+    hostname_connect_entry.insert(tk.END, NetworkThread.DEFAULT_HOST)
     port_connect_entry=tk.Entry(frame2)
+    port_connect_entry.insert(tk.END, NetworkThread.DEFAULT_PORT)
 
     hostname_connect_entry.grid(row=0,column=1)
     port_connect_entry.grid(row=1,column=1)

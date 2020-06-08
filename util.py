@@ -11,8 +11,11 @@ def encode_data(data):
 def decode_data(data):
     return base64.b64decode(data).decode("utf-8")
 
-def get_key(socket):
-    return "%s|%s" % socket.getpeername()
+def get_key(host, port):
+    return "%s|%s" % (host, port)
+
+# def get_key(socket):
+#     return "%s|%s" % socket.getpeername()
 
 #  Source: https://stackoverflow.com/a/38002212
 #  problem with windows: select only works on sockets, so if we want to include the queue in a select, we have to "emulate" a socket

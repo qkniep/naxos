@@ -5,7 +5,8 @@ class Connection:
     
     def __init__(self, queue, connections,
                  identifier,
-                 host, port):
+                 host, port,
+                 known = False):
         print("Connection %s created." % identifier)
         self.id = identifier
         self.host = host
@@ -16,9 +17,14 @@ class Connection:
         self.out = b''
 
         # need listening host/port pair, before we don't consider the connection complete
-        self._is_synchronized = False
-        self.lhost = None
-        self.lport = None
+        if not known:
+            self._is_synchronized = False
+            self.lhost = None
+            self.lport = None
+        else:
+            self._is_synchronized = True
+            self.lhost = host
+            self.lport = port
 
     def synchronize_peer(self):
         msg = Message({
@@ -30,7 +36,6 @@ class Connection:
             if conn is self or not conn.is_synchronized():
                 continue
             msg["hosts"].append(conn.get_laddr())
-        print(msg.serialize())
         self.send(msg)
 
 
@@ -60,16 +65,18 @@ class Connection:
         self.buf = b''
 
     def handle_message(self, msg):
-        print("--- Handle message: ---")
-        print(msg)
-        cmd = msg["do"]
+        print("[IN]:\t%s" % msg)
 
+        cmd = msg["do"]
         if cmd == "connect_to":
             for (host, port) in msg["hosts"]:
-                self.queue.put(("connect", {
-                    "host": host,
-                    "port": port
-                }))
+                if util.get_key(host, port) not in self.connections:
+                    self.queue.put(("connect", {
+                        "host": host,
+                        "port": port
+                    }))
+                else:
+                    print("already connected to (%s, %s)" % (host, port))
 
         elif cmd == "hello":
             # know listening host/port now -> connection is considered open
@@ -77,9 +84,9 @@ class Connection:
             self.lport = msg["content"]["lport"]
             self._is_synchronized = True
             self.synchronize_peer()
-        # self.send(msg)
 
     def send(self, msg):
+        print("[OUT]:\t%s" % msg.serialize())
         self.out += util.encode_data(msg.serialize()) + util.DELIMITER
 
     def has_data(self):

@@ -82,8 +82,8 @@ class NetworkThread(threading.Thread):
                 events = selectors.EVENT_READ | selectors.EVENT_WRITE
                 self.sel.register(sock, events, data=data)
 
-                ident = util.get_key(sock)
-                self.connections[ident] = (sock, Connection(self.queue, self.connections, ident, host, port))
+                ident = util.get_key(*sock.getpeername())
+                self.connections[ident] = (sock, Connection(self.queue, self.connections, ident, host, port, known=True))
                 self.get_connection(ident).send(Message({
                     "do": "hello",
                     "content": {
@@ -126,13 +126,13 @@ class NetworkThread(threading.Thread):
         events = selectors.EVENT_READ | selectors.EVENT_WRITE
         self.sel.register(conn, events, data=data)
 
-        ident = util.get_key(conn)
+        ident = util.get_key(*conn.getpeername())
         self.connections[ident] = (conn, Connection(self.queue, self.connections, ident, addr[0], addr[1]))
 
     def service_connection(self, key, mask):
         sock = key.fileobj
         data = key.data
-        ident = util.get_key(sock)
+        ident = util.get_key(*sock.getpeername())
         connection = self.get_connection(ident)
         if mask & selectors.EVENT_READ:
             try:
