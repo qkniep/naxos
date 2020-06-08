@@ -18,6 +18,7 @@ def get_key(socket):
 #  problem with windows: select only works on sockets, so if we want to include the queue in a select, we have to "emulate" a socket
 #  -> write a byte into it on every put, read one on every get
 #  ...kinda sad but it's windows.
+# TODO: is get/put thread-safe if both thread get/put?
 class PollableQueue(queue.Queue):
     def __init__(self):
         super().__init__()

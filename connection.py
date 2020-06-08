@@ -3,12 +3,13 @@ from message import Message
 
 class Connection:
     
-    def __init__(self, connections, identifier):
+    def __init__(self, queue, connections, identifier):
         print("Connection %s created." % identifier)
         self.id = identifier
+        self.connections = connections
+        self.queue = queue
         self.buf = b''
         self.out = b''
-        self.connections = connections
 
     def handle_data(self, data):
         if util.DELIMITER in data:  # message ends here

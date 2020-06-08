@@ -82,13 +82,12 @@ class NetworkThread(threading.Thread):
             self.sel.register(sock, events, data=data)
 
             ident = util.get_key(sock)
-            self.connections[ident] = (sock, Connection(self.connections, ident))
+            self.connections[ident] = (sock, Connection(self.queue, self.connections, ident))
             self.get_connection(ident).send(Message({
                 "content": "ping"
             }))
         else:
             print("Unknown command %s" % cmd)
-
 
     def reset(self):
         self.lsock.close()
@@ -121,7 +120,7 @@ class NetworkThread(threading.Thread):
         self.sel.register(conn, events, data=data)
 
         ident = util.get_key(conn)
-        self.connections[ident] = (conn, Connection(self.connections, ident))
+        self.connections[ident] = (conn, Connection(self.queue, self.connections, ident))
 
     def service_connection(self, key, mask):
         sock = key.fileobj
@@ -129,11 +128,17 @@ class NetworkThread(threading.Thread):
         ident = util.get_key(sock)
         connection = self.get_connection(ident)
         if mask & selectors.EVENT_READ:
-            recv_data = sock.recv(1024)  # Should be ready to read
-            if recv_data:
-                connection.handle_data(recv_data)
-            else:  # connection closed
-                log.debug('closing connection to %s' % str(data.addr))
+            try:
+                recv_data = sock.recv(1024)  # Should be ready to read
+                if recv_data:
+                    connection.handle_data(recv_data)
+                else:  # connection closed
+                    log.debug('closing connection to %s' % str(data.addr))
+                    self.sel.unregister(sock)
+                    sock.close()
+                    del self.connections[ident]
+            except (ConnectionResetError, ConnectionAbortedError):
+                print("Connection reset/aborted: %s" % ident)
                 self.sel.unregister(sock)
                 sock.close()
                 del self.connections[ident]
