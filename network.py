@@ -77,15 +77,22 @@ class NetworkThread(threading.Thread):
             print("Try to connect to (%s, %s)" % (host, port))
             data = types.SimpleNamespace(addr=(host, port), inb=b'', outb=b'')
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect((host, port))
-            events = selectors.EVENT_READ | selectors.EVENT_WRITE
-            self.sel.register(sock, events, data=data)
+            try:
+                sock.connect((host, port))
+                events = selectors.EVENT_READ | selectors.EVENT_WRITE
+                self.sel.register(sock, events, data=data)
 
-            ident = util.get_key(sock)
-            self.connections[ident] = (sock, Connection(self.queue, self.connections, ident))
-            self.get_connection(ident).send(Message({
-                "content": "ping"
-            }))
+                ident = util.get_key(sock)
+                self.connections[ident] = (sock, Connection(self.queue, self.connections, ident, host, port))
+                self.get_connection(ident).send(Message({
+                    "do": "hello",
+                    "content": {
+                        "lhost": self.host,
+                        "lport": self.port,
+                    },
+                }))
+            except ConnectionRefusedError:
+                print("Could not establish connection to (%s, %s)" % (host, port))
         else:
             print("Unknown command %s" % cmd)
 
@@ -120,7 +127,7 @@ class NetworkThread(threading.Thread):
         self.sel.register(conn, events, data=data)
 
         ident = util.get_key(conn)
-        self.connections[ident] = (conn, Connection(self.queue, self.connections, ident))
+        self.connections[ident] = (conn, Connection(self.queue, self.connections, ident, addr[0], addr[1]))
 
     def service_connection(self, key, mask):
         sock = key.fileobj

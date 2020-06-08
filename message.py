@@ -1,16 +1,16 @@
 import json
+import copy
 
-class Message:
+
+class Message(dict):
 
     def __init__(self, init={}):
-        self.dict = init
+        for key,val in init.items():
+            self[key] = copy.deepcopy(val)
 
     def serialize(self):
-        return json.dumps(self.dict)
+        return json.dumps(self)
 
     @staticmethod
     def deserialize(msg):
         return Message(json.loads(msg))
-
-    def __str__(self):
-        return str(self.dict)
