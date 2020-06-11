@@ -3,22 +3,22 @@ import queue
 import socket
 import os
 
-DELIMITER = b"|"
+DELIMITER = b'|'
 
 def encode_data(data):
-    return base64.b64encode(data.encode("utf-8"))
+    return base64.b64encode(data.encode('utf-8'))
 
 def decode_data(data):
-    return base64.b64decode(data).decode("utf-8")
+    return base64.b64decode(data).decode('utf-8')
 
 def get_key(host, port):
-    return "%s|%s" % (host, port)
+    return '%s|%s' % (host, port)
 
 # def get_key(socket):
-#     return "%s|%s" % socket.getpeername()
+#     return '%s|%s' % socket.getpeername()
 
 #  Source: https://stackoverflow.com/a/38002212
-#  problem with windows: select only works on sockets, so if we want to include the queue in a select, we have to "emulate" a socket
+#  problem with windows: select only works on sockets, so if we want to include the queue in a select, we have to 'emulate' a socket
 #  -> write a byte into it on every put, read one on every get
 #  ...kinda sad but it's windows.
 # TODO: is get/put thread-safe if both thread get/put?

@@ -1,8 +1,9 @@
 import util
 from message import Message
 
+
 class Connection:
-    
+
     def __init__(self, queue, connections,
                  identifier,
                  host, port,
@@ -50,17 +51,17 @@ class Connection:
                 self.reset_buffer()
         else:  # no message end in this chunk, so no parsing
             self.buf += data
-    
+
     def get_addr(self):
         return (self.host, self.port)
-    
+
     def get_laddr(self):
         return (self.lhost, self.lport)
 
     def parse_buffer(self):
         message = util.decode_data(self.buf)
         self.handle_message(Message.deserialize(message))
-    
+
     def reset_buffer(self):
         self.buf = b''
 

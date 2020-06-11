@@ -6,10 +6,11 @@ import socket
 from network import NetworkThread
 import util
 
+
 VERSION = 0.1
 log.basicConfig(level=log.DEBUG, filename='debug.log')
 
-if __name__ == "__main__":  # called as script, not as module
+if __name__ == '__main__':  # called as script, not as module
 
     def start(ip, port):
         global nt, queue

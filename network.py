@@ -40,7 +40,7 @@ class NetworkThread(threading.Thread):
         self.port = port
 
     def run(self):
-        print("Starting server on (%s, %s)" % (self.host, self.port))
+        print('Starting server on (%s, %s)' % (self.host, self.port))
 
         # create selector object, listening socket
         self.sel = selectors.DefaultSelector()
@@ -66,15 +66,15 @@ class NetworkThread(threading.Thread):
                     self.accept_wrapper(key.fileobj)
                 else:
                     self.service_connection(key, mask)
-        print("Stopping server")
+        print('Stopping server')
         self.reset()
 
     def handle_queue(self):
         cmd, payload = self.queue.get()
-        if cmd == "connect":
-            host = payload["host"]
-            port = payload["port"]
-            print("Try to connect to (%s, %s)" % (host, port))
+        if cmd == 'connect':
+            host = payload['host']
+            port = payload['port']
+            print('Try to connect to (%s, %s)' % (host, port))
             data = types.SimpleNamespace(addr=(host, port), inb=b'', outb=b'')
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
@@ -85,16 +85,16 @@ class NetworkThread(threading.Thread):
                 ident = util.get_key(*sock.getpeername())
                 self.connections[ident] = (sock, Connection(self.queue, self.connections, ident, host, port, known=True))
                 self.get_connection(ident).send(Message({
-                    "do": "hello",
-                    "content": {
-                        "lhost": self.host,
-                        "lport": self.port,
+                    'do': 'hello',
+                    'content': {
+                        'lhost': self.host,
+                        'lport': self.port,
                     },
                 }))
             except ConnectionRefusedError:
-                print("Could not establish connection to (%s, %s)" % (host, port))
+                print('Could not establish connection to (%s, %s)' % (host, port))
         else:
-            print("Unknown command %s" % cmd)
+            print('Unknown command %s' % cmd)
 
     def reset(self):
         self.lsock.close()
@@ -145,7 +145,7 @@ class NetworkThread(threading.Thread):
                     sock.close()
                     del self.connections[ident]
             except (ConnectionResetError, ConnectionAbortedError):
-                print("Connection reset/aborted: %s" % ident)
+                print('Connection reset/aborted: %s' % ident)
                 self.sel.unregister(sock)
                 sock.close()
                 del self.connections[ident]
