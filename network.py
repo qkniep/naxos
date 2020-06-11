@@ -35,10 +35,6 @@ class NetworkThread(threading.Thread):
         self.running = True
         self.done = False
 
-    def set_connection_pair(self, host, port):
-        self.host = host
-        self.port = port
-
     def run(self):
         print('Starting server on (%s, %s)' % (self.host, self.port))
 
@@ -93,6 +89,11 @@ class NetworkThread(threading.Thread):
                 }))
             except ConnectionRefusedError:
                 print('Could not establish connection to (%s, %s)' % (host, port))
+        elif cmd == 'send_msg':
+            sleep(1)
+        elif cmd == 'broadcast':
+            for conn in self.connections.values():
+                conn[1].send(Message(payload))
         else:
             print('Unknown command %s' % cmd)
 

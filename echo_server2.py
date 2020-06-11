@@ -5,6 +5,7 @@ import socket
 
 from network import NetworkThread
 import util
+import paxos
 
 
 VERSION = 0.1
@@ -40,7 +41,11 @@ if __name__ == '__main__':  # called as script, not as module
     if sys.argv[1] != 'server':
         start(sys.argv[1], sys.argv[2])
         connect(sys.argv[3], sys.argv[4])
+        start_paxos_round('hello')
     elif len(sys.argv) == 2:
         start(NetworkThread.DEFAULT_HOST, NetworkThread.DEFAULT_PORT)
     elif len(sys.argv) == 4:
         start(sys.argv[2], sys.argv[3])
+
+    #while len(nt.connections) < 1:
+    #    sleep(1)
