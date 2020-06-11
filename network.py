@@ -4,6 +4,8 @@ import threading
 import types
 import logging as log
 
+import miniupnpc
+
 import util
 from message import Message
 from connection import Connection
@@ -16,6 +18,10 @@ class NetworkThread(threading.Thread):
 
     def __init__(self, queue, host=DEFAULT_HOST, port=DEFAULT_PORT):
         threading.Thread.__init__(self)
+
+        # upnp port forwarding config
+        self.upnp = miniupnpc.UPnP()
+        self.upnp.discoverdelay = 10
 
         # gui thread communication
         self.queue = queue
@@ -41,13 +47,17 @@ class NetworkThread(threading.Thread):
 
     def run(self):
         print("Starting server on (%s, %s)" % (self.host, self.port))
+        self.register_forwarding()
 
         # create selector object, listening socket
-        self.sel = selectors.DefaultSelector()
-        self.lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.lsock.bind((self.host, self.port))
-        self.lsock.listen()
-        self.lsock.setblocking(False)
+        try:
+            self.sel = selectors.DefaultSelector()
+            self.lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.lsock.bind((self.host, self.port))
+            self.lsock.listen()
+            self.lsock.setblocking(False)
+        except Exception as e:
+            print("Something went wrong." + e)
 
         # register listening socket and comm. queue in select
         self.sel.register(self.lsock, selectors.EVENT_READ, data=None)
@@ -91,8 +101,9 @@ class NetworkThread(threading.Thread):
                         "lport": self.port,
                     },
                 }))
-            except ConnectionRefusedError:
+            except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as e:
                 print("Could not establish connection to (%s, %s)" % (host, port))
+                print(e)
         else:
             print("Unknown command %s" % cmd)
 
@@ -101,6 +112,7 @@ class NetworkThread(threading.Thread):
         self.sel.close()
         for _, (sock, _) in self.connections.items():  # close all sockets
             sock.close()
+        self.remove_forwarding()
         self.connections = {}
         self.lsock = None
         self.sel = None
@@ -154,3 +166,13 @@ class NetworkThread(threading.Thread):
                 log.debug('echoing %s to %s' % (repr(connection.out), data.addr))
                 sent = sock.send(connection.out)  # Should be ready to write
                 connection.out = connection.out[sent:]
+
+    def register_forwarding(self):
+        self.upnp.discover()
+        self.upnp.selectigd()
+        # addportmapping(external-port, protocol, internal-host, internal-port, description, remote-host)
+        self.upnp.addportmapping(self.port, 'TCP', self.upnp.lanaddr, self.port, 'Naxos', '')
+
+    def remove_forwarding(self):
+        # deleteportmapping(external-port, protocol, description)
+        self.upnp.deleteportmapping(self.port, "TCP", "Naxos")

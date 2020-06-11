@@ -61,9 +61,9 @@ if __name__ == "__main__":  # called as script, not as module
     hostname_entry.grid(row=0,column=1)
     port_entry.grid(row=1,column=1)
 
-    button1=tk.Button(frame,text="Start Server", command=start)
+    button1=tk.Button(frame,text="Start Listening", command=start)
     button1.grid(row=2,column=0)
-    button3=tk.Button(frame,text="Stop Server", command=stop)
+    button3=tk.Button(frame,text="Stop Listening", command=stop)
     button3.grid(row=2,column=1)
 
 
