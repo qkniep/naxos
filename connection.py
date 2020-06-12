@@ -9,7 +9,7 @@ class Connection:
                  host, port,
                  known = False):
         print('Connection %s created.' % identifier)
-        self.id = identifier
+        #self.id = identifier
         self.host = host
         self.port = port
         self.connections = connections

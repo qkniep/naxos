@@ -3,6 +3,7 @@ import queue
 import socket
 import os
 
+
 DELIMITER = b'|'
 
 def encode_data(data):

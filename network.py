@@ -1,38 +1,53 @@
+import logging as log
 import selectors
 import socket
 import threading
 import types
-import logging as log
 
 import miniupnpc
 
-import util
-from message import Message
 from connection import Connection
+from message import Message
+import util
 
 
 class NetworkThread(threading.Thread):
     TIMEOUT = 1
-    DEFAULT_HOST = '127.0.0.1'  # Standard loopback interface address (localhost)
-    DEFAULT_PORT = 65432        # Port to listen on (non-privileged ports are > 1023)
+    DEFAULT_PORT = 63000
 
-    def __init__(self, queue, host=DEFAULT_HOST, port=DEFAULT_PORT):
+    def __init__(self, queue):
         threading.Thread.__init__(self)
 
-        # upnp port forwarding config
-        self.upnp = miniupnpc.UPnP()
-        self.upnp.discoverdelay = 10
-
-        # gui thread communication
+        # cli thread communication
         self.queue = queue
 
-        # listening socket
-        self.host = host
-        self.port = port
-        self.lsock = None
+        # upnp port forwarding config
+        self.port = self.DEFAULT_PORT
+        self.upnp = miniupnpc.UPnP()
+        self.upnp.discoverdelay = 10
+        self.register_forwarding()
 
-        # select wrapper class
-        self.sel = None
+        # create selector object, listening socket
+        self.lsock = None
+        try_again = True  # until we find a free port
+        while try_again:
+            print('Start listening on (%s, %s)' % (self.host, self.port))
+            try:
+                self.sel = selectors.DefaultSelector()
+                self.lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.lsock.bind((self.host, self.port))
+                self.lsock.listen()
+                self.lsock.setblocking(False)
+                try_again = False
+            except Exception as e:
+                print('Could not open listening socket:', e)
+                self.port += 1
+
+        log.debug('listening on (%s, %s)' % (self.host, self.port))
+
+        # register listening socket and comm. queue in select
+        self.sel.register(self.lsock, selectors.EVENT_READ, data=None)
+        self.sel.register(self.queue, selectors.EVENT_READ)
 
         # mapping ident -> Connection object
         self.connections = {}
@@ -42,37 +57,16 @@ class NetworkThread(threading.Thread):
         self.done = False
 
     def run(self):
-        print('Starting server on (%s, %s)' % (self.host, self.port))
-        self.register_forwarding()
-
-        # create selector object, listening socket
-        try:
-            self.sel = selectors.DefaultSelector()
-            self.lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.lsock.bind((self.host, self.port))
-            self.lsock.listen()
-            self.lsock.setblocking(False)
-        except Exception as e:
-            print('Something went wrong.' + e)
-
-        # register listening socket and comm. queue in select
-        self.sel.register(self.lsock, selectors.EVENT_READ, data=None)
-        self.sel.register(self.queue, selectors.EVENT_READ)
-
-        log.debug('listening on (%s, %s)' % (self.host, self.port))
         while self.running:
             events = self.sel.select(timeout=self.TIMEOUT)
             for key, mask in events:
                 if key.fileobj is self.queue:
-                    #  handle gui messages here
                     self.handle_queue()
-                    continue
-
-                if key.fileobj is self.lsock:
-                    self.accept_wrapper(key.fileobj)
+                elif key.fileobj is self.lsock:
+                    self.accept_wrapper()
                 else:
-                    self.service_connection(key, mask)
-        print('Stopping server')
+                    self.service_connection(key.fileobj, key.data, mask)
+        print('Shutting down this peer...')
         self.reset()
 
     def handle_queue(self):
@@ -98,20 +92,19 @@ class NetworkThread(threading.Thread):
                     },
                 }))
             except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as e:
-                print('Could not establish connection to (%s, %s)' % (host, port))
-                print(e)
+                print('Could not establish connection to (%s, %s):' % (host, port), e)
         elif cmd == 'send_msg':
             sleep(1)
         elif cmd == 'broadcast':
-            for conn in self.connections.values():
-                conn[1].send(Message(payload))
+            for _, conn in self.connections.values():
+                conn.send(Message(payload))
         else:
-            print('Unknown command %s' % cmd)
+            print('Unknown command:', cmd)
 
     def reset(self):
         self.lsock.close()
         self.sel.close()
-        for _, (sock, _) in self.connections.items():  # close all sockets
+        for sock, _ in self.connections.values():
             sock.close()
         self.remove_forwarding()
         self.connections = {}
@@ -131,20 +124,18 @@ class NetworkThread(threading.Thread):
     def get_socket(self, ident):
         return self.connections[ident][0]
 
-    def accept_wrapper(self, sock):
-        conn, addr = sock.accept()  # Should be ready to read
+    def accept_wrapper(self):
+        sock, addr = self.lsock.accept()  # Should be ready to read
         log.debug('accepted connection from %s' % str(addr))
-        conn.setblocking(False)
+        sock.setblocking(False)
         data = types.SimpleNamespace(addr=addr, inb=b'', outb=b'')
         events = selectors.EVENT_READ | selectors.EVENT_WRITE
-        self.sel.register(conn, events, data=data)
+        self.sel.register(sock, events, data=data)
 
-        ident = util.get_key(*conn.getpeername())
-        self.connections[ident] = (conn, Connection(self.queue, self.connections, ident, addr[0], addr[1]))
+        ident = util.get_key(*sock.getpeername())
+        self.connections[ident] = (sock, Connection(self.queue, self.connections, ident, addr[0], addr[1]))
 
-    def service_connection(self, key, mask):
-        sock = key.fileobj
-        data = key.data
+    def service_connection(self, sock, data, mask):
         ident = util.get_key(*sock.getpeername())
         connection = self.get_connection(ident)
         if mask & selectors.EVENT_READ:
@@ -158,13 +149,13 @@ class NetworkThread(threading.Thread):
                     sock.close()
                     del self.connections[ident]
             except (ConnectionResetError, ConnectionAbortedError):
-                print('Connection reset/aborted: %s' % ident)
+                print('Connection reset/aborted:', ident)
                 self.sel.unregister(sock)
                 sock.close()
                 del self.connections[ident]
         if mask & selectors.EVENT_WRITE:
             if connection.has_data():
-                log.debug('echoing %s to %s' % (repr(connection.out), data.addr))
+                log.debug('echoing %s from buffer to socket %s' % (repr(connection.out), data.addr))
                 sent = sock.send(connection.out)  # Should be ready to write
                 connection.out = connection.out[sent:]
 
@@ -172,8 +163,8 @@ class NetworkThread(threading.Thread):
         self.upnp.discover()
         self.upnp.selectigd()
         # addportmapping(external-port, protocol, internal-host, internal-port, description, remote-host)
-        print(self.upnp.lanaddr)
         self.upnp.addportmapping(self.port, 'TCP', self.upnp.lanaddr, self.port, 'Naxos', '')
+        self.host = self.upnp.lanaddr
 
     def remove_forwarding(self):
         # deleteportmapping(external-port, protocol, description)
