@@ -1,11 +1,11 @@
-import threading
 import logging as log
 import sys
 import socket
+import threading
 
 from network import NetworkThread
-import util
 import paxos
+import util
 
 
 VERSION = 0.1
@@ -46,6 +46,3 @@ if __name__ == '__main__':  # called as script, not as module
         start(NetworkThread.DEFAULT_HOST, NetworkThread.DEFAULT_PORT)
     elif len(sys.argv) == 4:
         start(sys.argv[2], sys.argv[3])
-
-    #while len(nt.connections) < 1:
-    #    sleep(1)

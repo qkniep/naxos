@@ -42,7 +42,7 @@ class NetworkThread(threading.Thread):
         self.done = False
 
     def run(self):
-        print("Starting server on (%s, %s)" % (self.host, self.port))
+        print('Starting server on (%s, %s)' % (self.host, self.port))
         self.register_forwarding()
 
         # create selector object, listening socket
@@ -53,7 +53,7 @@ class NetworkThread(threading.Thread):
             self.lsock.listen()
             self.lsock.setblocking(False)
         except Exception as e:
-            print("Something went wrong." + e)
+            print('Something went wrong.' + e)
 
         # register listening socket and comm. queue in select
         self.sel.register(self.lsock, selectors.EVENT_READ, data=None)
@@ -172,8 +172,9 @@ class NetworkThread(threading.Thread):
         self.upnp.discover()
         self.upnp.selectigd()
         # addportmapping(external-port, protocol, internal-host, internal-port, description, remote-host)
+        print(self.upnp.lanaddr)
         self.upnp.addportmapping(self.port, 'TCP', self.upnp.lanaddr, self.port, 'Naxos', '')
 
     def remove_forwarding(self):
         # deleteportmapping(external-port, protocol, description)
-        self.upnp.deleteportmapping(self.port, "TCP", "Naxos")
+        self.upnp.deleteportmapping(self.port, 'TCP', 'Naxos')

@@ -14,7 +14,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     i = 0
     while True:
         msg = Message({
-            "content": string.ascii_letters[i]
+            'content': string.ascii_letters[i]
         })
         # s.sendall(util.encode_data(string.ascii_letters[i]) + util.DELIMITER)
         s.sendall(util.encode_data(msg.serialize()) + util.DELIMITER)
