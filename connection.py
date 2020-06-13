@@ -9,7 +9,6 @@ class Connection:
                  host, port,
                  known = False):
         print('Connection %s created.' % identifier)
-        #self.id = identifier
         self.host = host
         self.port = port
         self.connections = connections
@@ -32,25 +31,21 @@ class Connection:
             'do': 'connect_to',
             'hosts': [],
         })
-        for _, (_, conn) in self.connections.items():
+        for _, conn in self.connections.values():
             # ignore self and non-open connections -> connections to those will be made when they are opened themselves
             if conn is self or not conn.is_synchronized():
                 continue
             msg['hosts'].append(conn.get_laddr())
         self.send(msg)
 
-
     def handle_data(self, data):
-        if util.DELIMITER in data:  # message ends here
-            splitted = data.split(util.DELIMITER)  # it could happen that we receive multiple messages in one chunk
-            for i, msg in enumerate(splitted):
-                self.buf += msg
-                if i == len(splitted)-1:  # last one is either incomplete or empty string, so no parsing in this case
-                    break
-                self.parse_buffer()
-                self.reset_buffer()
-        else:  # no message end in this chunk, so no parsing
-            self.buf += data
+        splitted = data.split(util.DELIMITER)  # it could happen that we receive multiple messages in one chunk
+        for i, msg in enumerate(splitted):
+            self.buf += msg
+            if i == len(splitted)-1:  # last one is either incomplete or empty string, so no parsing in this case
+                break
+            self.parse_buffer()
+            self.reset_buffer()
 
     def get_addr(self):
         return (self.host, self.port)
@@ -70,21 +65,30 @@ class Connection:
 
         cmd = msg['do']
         if cmd == 'connect_to':
-            for (host, port) in msg['hosts']:
+            for host, port in msg['hosts']:
                 if util.get_key(host, port) not in self.connections:
                     self.queue.put(('connect', {
                         'host': host,
                         'port': port
                     }))
                 else:
-                    print('already connected to (%s, %s)' % (host, port))
-
+                    print('Already connected to (%s, %s).' % (host, port))
         elif cmd == 'hello':
             # know listening host/port now -> connection is considered open
             self.lhost = msg['content']['lhost']
             self.lport = msg['content']['lport']
             self._is_synchronized = True
             self.synchronize_peer()
+        elif cmd == 'paxos_prepare':
+            handle_prepare()
+        elif cmd == 'paxos_promise':
+            handle_promise()
+        elif cmd == 'paxos_propose':
+            handle_propose()
+        elif cmd == 'paxos_accept':
+            handle_accept()
+        elif cmd == 'paxos_learn':
+            handle_learn()
 
     def send(self, msg):
         print('[OUT]:\t%s' % msg.serialize())
