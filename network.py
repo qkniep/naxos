@@ -55,7 +55,7 @@ class NetworkNode:
         print('Shutting down this peer...')
         self.reset()
 
-        def handle_queue(self):
+    def handle_queue(self):
         cmd, payload = self.queue.get()
         if cmd == 'connect':
             host = payload['host']
@@ -64,7 +64,7 @@ class NetworkNode:
         else:
             print('Unknown command:', cmd)
 
-        def reset(self):
+    def reset(self):
         self.lsock.close()
         self.sel.close()
         for sock, _ in self.connections.values():
