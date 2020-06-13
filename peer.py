@@ -1,8 +1,5 @@
 import logging as log
-import random
-import sys
-import socket
-import threading
+import random, selectors, sys, socket, threading
 
 from network import NetworkNode
 from paxos import PaxosNode
@@ -11,17 +8,61 @@ import util
 
 class Peer(threading.Thread):
 
-    VERSION = 0.1
+    SELECT_TIMEOUT = 1
+    VERSION = '0.2.0'
 
     def __init__(self):
         threading.Thread.__init__(self)
 
         self.queue = util.PollableQueue()
-        self.network = NetworkNode(self.queue)
+        self.selector = selectors.DefaultSelector()
+        self.selector.register(self.queue, selectors.EVENT_READ)
+        self.network = NetworkNode(self.selector)
         self.paxos = PaxosNode(self.network, random.getrandbits(128), len(self.network.connections)+1)
+        self.running = True
 
     def run(self):
-        self.network.run()
+        print('Running Naxos v' + self.VERSION)
+        while self.running:
+            events = self.selector.select(timeout=self.SELECT_TIMEOUT)
+            for key, mask in events:
+                if key.fileobj is self.queue:
+                    self.handle_queue()
+                elif key.fileobj is self.network.listen_sock:
+                    self.network.accept_incoming_connection()
+                else:
+                    for msg in self.network.service_connection(key.fileobj, mask):
+                        self.handle_message(key.fileobj, msg)
+        print('Shutting down this peer...')
+        self.network.reset()
+
+    def handle_queue(self):
+        cmd, payload = self.queue.get()
+        if cmd == 'connect':
+            self.network.connect_to_node(payload['addr'])
+        else:
+            print('Unknown command:', cmd)
+
+    def handle_message(self, sock, msg):
+        print('[IN]:\t%s' % msg)
+
+        cmd = msg['do']
+        if cmd == 'connect_to':
+            for addr in filter(lambda a: a not in self.network.connections, msg['hosts']):
+                self.network.connect_to_node(addr)
+        elif cmd == 'hello':
+            # know listening host/port now -> connection is considered open
+            self.network.synchronize_peer(sock.getpeername(), msg['listen_addr'])
+        elif cmd == 'paxos_prepare':
+            self.paxos.handle_prepare()
+        elif cmd == 'paxos_promise':
+            self.paxos.handle_promise()
+        elif cmd == 'paxos_propose':
+            self.paxos.handle_propose()
+        elif cmd == 'paxos_accept':
+            self.paxos.handle_accept()
+        elif cmd == 'paxos_learn':
+            self.paxos.handle_learn()
 
     def stop(self):
         if self.network:
@@ -29,18 +70,16 @@ class Peer(threading.Thread):
 
     def connect_to_peer(self, ip, port):
         self.queue.put(('connect', {
-            'host': ip,
-            'port': int(port),
+            'addr': (ip, int(port)),
         }))
 
     def on_close(self):
-        if self.network is not None:
-            self.network.stop()
-            while not self.network.is_done():  # blocking wait
-                pass
+        self.running = False
+        while not self.network.is_done():
+            pass
 
 
-if __name__ == '__main__':  # called as script, not as module
+if __name__ == '__main__':
 
     log.basicConfig(level=log.DEBUG, filename='debug.log')
     peer = Peer()

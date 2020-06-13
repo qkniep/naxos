@@ -1,7 +1,4 @@
-import base64
-import queue
-import socket
-import os
+import base64, os, queue, socket
 
 
 DELIMITER = b'|'

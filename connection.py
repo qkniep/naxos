@@ -1,101 +1,50 @@
-import util
+import logging as log
+
 from message import Message
+import util
 
 
 class Connection:
 
-    def __init__(self, queue, connections,
-                 identifier,
-                 host, port,
-                 known = False):
-        print('Connection %s created.' % identifier)
-        self.host = host
-        self.port = port
-        self.connections = connections
-        self.queue = queue
-        self.buf = b''
-        self.out = b''
+    def __init__(self, sock, known = False):
+        print('Connection created: ', sock.getsockname())
+        self.sock = sock
+        self.in_buf = b''
+        self.out_buf = b''
 
-        # need listening host/port pair, before we don't consider the connection complete
+        # need peer's listening address, before that we don't consider the connection complete
         if not known:
             self._is_synchronized = False
-            self.lhost = None
-            self.lport = None
+            self.remote_listen_addr = None
         else:
             self._is_synchronized = True
-            self.lhost = host
-            self.lport = port
+            #self.remote_listen_addr = (host, port) ???
 
     def synchronize_peer(self):
-        msg = Message({
-            'do': 'connect_to',
-            'hosts': [],
-        })
-        for _, conn in self.connections.values():
-            # ignore self and non-open connections -> connections to those will be made when they are opened themselves
-            if conn is self or not conn.is_synchronized():
-                continue
-            msg['hosts'].append(conn.get_laddr())
-        self.send(msg)
+        pass
 
     def handle_data(self, data):
         splitted = data.split(util.DELIMITER)  # it could happen that we receive multiple messages in one chunk
-        for i, msg in enumerate(splitted):
-            self.buf += msg
+        for i, msg_chunk in enumerate(splitted):
+            self.in_buf += msg_chunk
             if i == len(splitted)-1:  # last one is either incomplete or empty string, so no parsing in this case
                 break
-            self.parse_buffer()
-            self.reset_buffer()
+            yield from self.parse_in_buffer()
 
-    def get_addr(self):
-        return (self.host, self.port)
-
-    def get_laddr(self):
-        return (self.lhost, self.lport)
-
-    def parse_buffer(self):
-        message = util.decode_data(self.buf)
-        self.handle_message(Message.deserialize(message))
-
-    def reset_buffer(self):
-        self.buf = b''
-
-    def handle_message(self, msg):
-        print('[IN]:\t%s' % msg)
-
-        cmd = msg['do']
-        if cmd == 'connect_to':
-            for host, port in msg['hosts']:
-                if util.get_key(host, port) not in self.connections:
-                    self.queue.put(('connect', {
-                        'host': host,
-                        'port': port
-                    }))
-                else:
-                    print('Already connected to (%s, %s).' % (host, port))
-        elif cmd == 'hello':
-            # know listening host/port now -> connection is considered open
-            self.lhost = msg['content']['lhost']
-            self.lport = msg['content']['lport']
-            self._is_synchronized = True
-            self.synchronize_peer()
-        elif cmd == 'paxos_prepare':
-            handle_prepare()
-        elif cmd == 'paxos_promise':
-            handle_promise()
-        elif cmd == 'paxos_propose':
-            handle_propose()
-        elif cmd == 'paxos_accept':
-            handle_accept()
-        elif cmd == 'paxos_learn':
-            handle_learn()
+    def parse_in_buffer(self):
+        message = util.decode_data(self.in_buf)
+        yield Message.deserialize(message)
+        self.in_buf = b''
 
     def send(self, msg):
         print('[OUT]:\t%s' % msg.serialize())
-        self.out += util.encode_data(msg.serialize()) + util.DELIMITER
+        self.out_buf += util.encode_data(msg.serialize()) + util.DELIMITER
 
-    def has_data(self):
-        return self.out != b''
+    def flush_out_buffer(self):
+        if self.out_buf:
+            sent = self.sock.send(self.out_buf)
+            log.debug('echo %s from buffer to socket %s' % (repr(self.out_buf[:sent]), self.sock.getsockname()))
+            self.out_buf = self.out_buf[sent:]
 
     def is_synchronized(self):
         return self._is_synchronized
