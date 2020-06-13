@@ -99,6 +99,3 @@ class Connection:
 
     def is_synchronized(self):
         return self._is_synchronized
-
-    def send_to(self, conn, msg):
-        self.connections[conn].send(msg)
