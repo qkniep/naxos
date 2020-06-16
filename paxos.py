@@ -29,7 +29,7 @@ class PaxosNode:
             'accepted': self.accepted_value,
         })
 
-    def handle_promise(self, proposal_id, value):  # TODO: ignore duplicate accepts from same peer
+    def handle_promise(self, proposal_id, value):
         if proposal_id != self.current_id:
             print('Rejecting Promise: proposal_id != current_id')
             return
@@ -37,8 +37,6 @@ class PaxosNode:
         if value is not None:
             self.accepted_value = value  #???
         if self.promises == self.majority():
-            print('Got majority of size: ', self.promises)
-            print('Needed: ', self.majority())
             self.acceptances = 1
             self.network_node.broadcast({
                 'do': 'paxos_propose',
@@ -57,7 +55,7 @@ class PaxosNode:
             'id': proposal_id
         })
 
-    def handle_accept(self, proposal_id):  # TODO: ignore duplicate accepts from same peer
+    def handle_accept(self, proposal_id):
         if proposal_id != self.current_id:
             print('Rejecting Accept: proposal_id != current_id')
             return
