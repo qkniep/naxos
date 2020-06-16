@@ -40,7 +40,7 @@ class PaxosNode:
                 'value': accepted_value,
             })
 
-    def handle_propose(proposal_id, value):
+    def handle_propose(self, proposal_id, value):
         if proposal_id < self.highest_promised:
             return
         self.accepted_value = value
@@ -51,7 +51,7 @@ class PaxosNode:
             'id': proposal_id
         })
 
-    def handle_accept():
+    def handle_accept(self, proposal_id):
         if id != self.current_id:
             return
         self.acceptances += 1
@@ -63,6 +63,6 @@ class PaxosNode:
             })
             self.chosen = True
 
-    def handle_learn(self, value):
+    def handle_learn(self, proposal_id, value):
         self.accepted_value = value
         self.chosen = True

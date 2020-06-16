@@ -31,7 +31,6 @@ class NetworkNode:
 
     def accept_incoming_connection(self):
         sock, addr = self.listen_sock.accept()
-        print('ACCEPT', addr)
         log.debug('accepted connection from %s' % str(addr))
         sock.setblocking(False)
         events = selectors.EVENT_READ | selectors.EVENT_WRITE
@@ -59,11 +58,10 @@ class NetworkNode:
         conn = self.connections[peer_addr]
         conn.remote_listen_addr = peer_listen_addr
         # ignore self and non-open connections -> connections to those will be made when they are opened themselves
-        #neighbors = self.connections.values().filter(lambda c: c != self and c.is_synchronized())
         neighbors = filter(lambda c: c != self and c.is_synchronized(), self.connections.values())
         conn.send(Message({
             'do': 'connect_to',
-            'hosts': list(map(lambda c: c.remote_listen_addr, neighbors)),
+            'hosts': [c.remote_listen_addr for c in neighbors]
         }))
         conn._is_synchronized = True
 
@@ -100,8 +98,8 @@ class NetworkNode:
         self.get_socket(addr).close()
         del self.connections[addr]
 
-    def broadcast(self, msg):
-        for _, conn in self.connections.values():
+    def broadcast(self, payload):
+        for conn in self.connections.values():
             conn.send(Message(payload))
 
     def register_forwarding(self, host, port):

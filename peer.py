@@ -30,6 +30,7 @@ class Peer(threading.Thread):
                     self.handle_queue()
                 elif key.fileobj is self.network.listen_sock:
                     self.network.accept_incoming_connection()
+                    self.paxos.start_paxos_round('hello')
                 else:
                     for msg in self.network.service_connection(key.fileobj, mask):
                         self.handle_message(key.fileobj, msg)
@@ -54,15 +55,15 @@ class Peer(threading.Thread):
             # know listening host/port now -> connection is considered open
             self.network.synchronize_peer(sock.getpeername(), msg['listen_addr'])
         elif cmd == 'paxos_prepare':
-            self.paxos.handle_prepare()
+            self.paxos.handle_prepare(tuple(msg['id']))
         elif cmd == 'paxos_promise':
-            self.paxos.handle_promise()
+            self.paxos.handle_promise(tuple(msg['id']), msg['value'])
         elif cmd == 'paxos_propose':
-            self.paxos.handle_propose()
+            self.paxos.handle_propose(tuple(msg['id']), msg['value'])
         elif cmd == 'paxos_accept':
-            self.paxos.handle_accept()
+            self.paxos.handle_accept(tuple(msg['id']))
         elif cmd == 'paxos_learn':
-            self.paxos.handle_learn()
+            self.paxos.handle_learn(tuple(msg['id']), msg['value'])
 
     def stop(self):
         if self.network:
