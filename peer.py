@@ -77,9 +77,9 @@ class Peer(threading.Thread):
         }))
         self.paxos.group_size += 1
 
-    def run_paxos(self, value):
+    def run_paxos(self):
         self.queue.put(('start_paxos', {
-            'value': value,
+            'value': self.network.get_random_addr(),
         }))
 
     def on_close(self):
@@ -96,4 +96,4 @@ if __name__ == '__main__':
     if sys.argv[1] != 'server':
         peer.connect_to_peer(sys.argv[1], sys.argv[2])
     if input() == 'p':
-        peer.run_paxos('hello')
+        peer.run_paxos()

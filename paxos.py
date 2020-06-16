@@ -4,7 +4,7 @@ class PaxosNode:
         print('This peer is now operating Paxos node %i in a group of size %i' % (node_id, num_peers))
         self.network_node = network_node
         self.group_size = num_peers
-        self.current_id = (5, node_id)
+        self.current_id = (0, node_id)
         self.highest_promised = (0, 0)
         self.accepted_value = None
         self.chosen = False

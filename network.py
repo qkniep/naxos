@@ -1,5 +1,5 @@
 import logging as log
-import selectors, socket, types
+import random, selectors, socket, types
 
 import miniupnpc
 
@@ -88,7 +88,7 @@ class NetworkNode:
             self.selector.register(sock, events)
 
             conn = Connection(sock, known=True)
-            self.connections[sock.getpeername()] = conn
+            self.connections[addr] = conn
             conn.send(Message({
                 'do': 'hello',
                 'listen_addr': self.listen_sock.getsockname(),
@@ -122,6 +122,9 @@ class NetworkNode:
 
     def get_socket(self, addr):
         return self.connections[addr].sock
+
+    def get_random_addr(self):
+        return random.choice(list(self.connections.keys()))
 
 
 def create_listening_socket(host, port):
