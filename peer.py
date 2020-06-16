@@ -30,7 +30,6 @@ class Peer(threading.Thread):
                     self.handle_queue()
                 elif key.fileobj is self.network.listen_sock:
                     self.network.accept_incoming_connection()
-                    self.paxos.start_paxos_round('hello')
                 else:
                     for msg in self.network.service_connection(key.fileobj, mask):
                         self.handle_message(key.fileobj, msg)
@@ -41,6 +40,8 @@ class Peer(threading.Thread):
         cmd, payload = self.queue.get()
         if cmd == 'connect':
             self.network.connect_to_node(payload['addr'])
+        if cmd == 'start_paxos':
+            self.paxos.start_paxos_round(payload['value'])
         else:
             print('Unknown command:', cmd)
 
@@ -49,17 +50,18 @@ class Peer(threading.Thread):
 
         cmd = msg['do']
         if cmd == 'connect_to':
-            for addr in filter(lambda a: a not in self.network.connections, msg['hosts']):
-                self.network.connect_to_node(addr)
+            hosts = [tuple(h) for h in msg['hosts']]
+            for addr in filter(lambda a: a not in self.network.connections, hosts):
+                self.connect_to_peer(*addr)
         elif cmd == 'hello':
             # know listening host/port now -> connection is considered open
             self.network.synchronize_peer(sock.getpeername(), msg['listen_addr'])
         elif cmd == 'paxos_prepare':
-            self.paxos.handle_prepare(tuple(msg['id']))
+            self.paxos.handle_prepare(sock.getpeername(), tuple(msg['id']))
         elif cmd == 'paxos_promise':
-            self.paxos.handle_promise(tuple(msg['id']), msg['value'])
+            self.paxos.handle_promise(tuple(msg['id']), msg['accepted'])
         elif cmd == 'paxos_propose':
-            self.paxos.handle_propose(tuple(msg['id']), msg['value'])
+            self.paxos.handle_propose(sock.getpeername(), tuple(msg['id']), msg['value'])
         elif cmd == 'paxos_accept':
             self.paxos.handle_accept(tuple(msg['id']))
         elif cmd == 'paxos_learn':
@@ -72,6 +74,12 @@ class Peer(threading.Thread):
     def connect_to_peer(self, ip, port):
         self.queue.put(('connect', {
             'addr': (ip, int(port)),
+        }))
+        self.paxos.group_size += 1
+
+    def run_paxos(self, value):
+        self.queue.put(('start_paxos', {
+            'value': value,
         }))
 
     def on_close(self):
@@ -87,3 +95,5 @@ if __name__ == '__main__':
     peer.start()
     if sys.argv[1] != 'server':
         peer.connect_to_peer(sys.argv[1], sys.argv[2])
+    if input() == 'p':
+        peer.run_paxos('hello')

@@ -7,9 +7,12 @@ from connection import Connection
 from message import Message
 
 
+# Wrapper for socket API and uPnP:
+# - listening for incoming connectionst
+# - establishing connections to peers
 class NetworkNode:
 
-    DEFAULT_PORT = 63001
+    DEFAULT_PORT = 63002
     RECV_BUFFER = 2048
 
     def __init__(self, selector):
@@ -18,7 +21,7 @@ class NetworkNode:
         self.upnp.discoverdelay = 10
         self.upnp.discover()
         self.upnp.selectigd()
-        host = self.upnp.lanaddr
+        host = self.upnp.lanaddr  # TODO: register port forwarding on local address but give peers global address
         port = self.DEFAULT_PORT
         self.register_forwarding(host, port)
         self.listen_sock = create_listening_socket(host, port)
@@ -98,7 +101,11 @@ class NetworkNode:
         self.get_socket(addr).close()
         del self.connections[addr]
 
+    def send(self, addr, payload):
+        self.connections[addr].send(Message(payload))
+
     def broadcast(self, payload):
+        print('NUMBER OF CONNECTIONS: ', len(self.connections))
         for conn in self.connections.values():
             conn.send(Message(payload))
 

@@ -18,7 +18,7 @@ class Connection:
             self.remote_listen_addr = None
         else:
             self._is_synchronized = True
-            #self.remote_listen_addr = (host, port) ???
+            self.remote_listen_addr = sock.getpeername()
 
     def synchronize_peer(self):
         pass
