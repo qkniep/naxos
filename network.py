@@ -25,6 +25,7 @@ class NetworkNode:
         port = self.DEFAULT_PORT
         self.register_forwarding(host, port)
         self.listen_sock = create_listening_socket(host, port)
+        self.listen_addr = (self.upnp.externalipaddress(), port)
 
         self.selector = selector
         self.selector.register(self.listen_sock, selectors.EVENT_READ)
@@ -91,7 +92,7 @@ class NetworkNode:
             self.connections[addr] = conn
             conn.send(Message({
                 'do': 'hello',
-                'listen_addr': self.listen_sock.getsockname(),
+                'listen_addr': self.listen_addr,
             }))
         except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as e:
             print('Could not establish connection to (%s, %s):' % addr, e)
