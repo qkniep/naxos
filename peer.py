@@ -66,6 +66,15 @@ class Peer(threading.Thread):
             self.paxos.handle_accept(tuple(msg['id']))
         elif cmd == 'paxos_learn':
             self.paxos.handle_learn(tuple(msg['id']), msg['value'])
+        elif cmd == 'index_search':
+            self.network.send(sock.getpeername(), {
+                'do': 'index_search_result',
+                'addr': self.index.search_entry(msg['filename']),
+            })
+        elif cmd == 'index_add':
+            self.index.add_entry(msg['filename'], sock.getpeername())
+        elif cmd == 'index_remove':
+            self.index.add_entry(msg['filename'])
 
     def stop(self):
         if self.network:
