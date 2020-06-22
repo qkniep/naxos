@@ -1,9 +1,11 @@
+import json
+
+
 class Index():
 
     def __init__(self):
         self.index = {}
         # TODO: self.reverse_index = {}  // map client addr -> filename
-        self.change_log = []
 
     def search_entry(self, filename):
         return self.index[filename]
@@ -14,4 +16,8 @@ class Index():
     def remove_entry(self, filename):
         del self.index[filename]
 
+    def toJSON(self):
+        return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True, indent=4)
 
+    def fromJSON(self, index):
+        self.index = json.loads(index)['index']

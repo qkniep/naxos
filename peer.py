@@ -1,6 +1,7 @@
 import logging as log
 import random, selectors, sys, socket, threading
 
+from index import Index
 from network import NetworkNode
 from paxos import PaxosNode
 import util
@@ -20,6 +21,7 @@ class Peer(threading.Thread):
         self.network = NetworkNode(self.selector)
         # TODO: use address (IP+Port) instead of PRNG to derive unique node_id
         self.paxos = PaxosNode(self.network, random.getrandbits(128), len(self.network.connections)+1)
+        self.index = Index()
         self.running = True
 
     def run(self):
@@ -57,6 +59,16 @@ class Peer(threading.Thread):
         elif cmd == 'hello':
             # know listening host/port now -> connection is considered open
             self.network.synchronize_peer(sock.getpeername(), msg['listen_addr'])
+            if self.paxos.group_size == 1:
+                self.send_paxos_join_confirmation(sock.getpeername())
+            else:
+                self.run_paxos({
+                    'change': 'join',
+                    'entry': sock.getpeername(),
+                })
+        elif cmd == 'paxos_join':
+            self.paxos.group_size = msg['group_size']
+            self.index.fromJSON(msg['index'])
         elif cmd == 'paxos_prepare':
             self.paxos.handle_prepare(sock.getpeername(), tuple(msg['id']))
         elif cmd == 'paxos_promise':
@@ -66,6 +78,13 @@ class Peer(threading.Thread):
         elif cmd == 'paxos_accept':
             self.paxos.handle_accept(tuple(msg['id']))
         elif cmd == 'paxos_learn':
+            v = msg['value']
+            if v['change'] == 'join':
+                self.send_paxos_join_confirmation(v['entry'])
+            elif v['change'] == 'add':
+                self.index.add_entry(v['entry'], v['addr'])
+            elif v['change'] == 'remove':
+                self.index.remove_entry(v['entry'])
             self.paxos.handle_learn(tuple(msg['id']), msg['value'])
         elif cmd == 'index_search':
             self.network.send(sock.getpeername(), {
@@ -73,9 +92,17 @@ class Peer(threading.Thread):
                 'addr': self.index.search_entry(msg['filename']),
             })
         elif cmd == 'index_add':
-            self.index.add_entry(msg['filename'], sock.getpeername())
+            addr = self.network.get_remote_listen_addr(sock)
+            self.run_paxos({
+                'change': 'add',
+                'entry': msg['filename'],
+                'addr': addr,
+            })
         elif cmd == 'index_remove':
-            self.index.add_entry(msg['filename'])
+            self.run_paxos({
+                'change': 'remove',
+                'entry': msg['filename'],
+            })
 
     def stop(self):
         if self.network:
@@ -85,17 +112,24 @@ class Peer(threading.Thread):
         self.queue.put(('connect', {
             'addr': (ip, int(port)),
         }))
-        self.paxos.group_size += 1
 
-    def run_paxos(self):
+    def run_paxos(self, value):
         self.queue.put(('start_paxos', {
-            'value': self.network.get_random_addr(),
+            'value': value,
         }))
 
     def on_close(self):
         self.running = False
         while not self.network.is_done():
             pass
+
+    def send_paxos_join_confirmation(self, addr):
+        self.paxos.group_size += 1
+        self.network.send(addr, {
+            'do': 'paxos_join',
+            'group_size': self.paxos.group_size,
+            'index': self.index.toJSON(),
+        })
 
 
 if __name__ == '__main__':
@@ -105,5 +139,3 @@ if __name__ == '__main__':
     peer.start()
     if sys.argv[1] != 'server':
         peer.connect_to_peer(sys.argv[1], sys.argv[2])
-    if input() == 'p':
-        peer.run_paxos()

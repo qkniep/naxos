@@ -12,7 +12,7 @@ from message import Message
 # - establishing connections to peers
 class NetworkNode:
 
-    DEFAULT_PORT = 63002
+    DEFAULT_PORT = 63001
     RECV_BUFFER = 2048
 
     def __init__(self, selector):
@@ -120,6 +120,9 @@ class NetworkNode:
 
     def is_done(self):
         return self.done
+
+    def get_remote_listen_addr(self, sock):
+        return self.connections[sock.getpeername()].remote_listen_addr
 
     def get_socket(self, addr):
         return self.connections[addr].sock

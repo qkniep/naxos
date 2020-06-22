@@ -36,6 +36,7 @@ class PaxosNode:
         self.promises += 1
         if value is not None:
             self.accepted_value = value  #???
+        print(self.majority())
         if self.promises == self.majority():
             self.acceptances = 1
             self.network_node.broadcast({
@@ -73,4 +74,4 @@ class PaxosNode:
         self.chosen = True
 
     def majority(self):
-        return (self.group_size + 1) // 2
+        return (self.group_size) // 2 + 1
