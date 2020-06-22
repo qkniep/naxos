@@ -29,34 +29,34 @@ class InputThread(threading.Thread):
     def run(self):
         while self.running:
             try:
-                line = input("> ")
+                line = input('> ')
             except EOFError:
-                print("Encountered EOF in stdin ಠ_ಠ")
+                print('Encountered EOF in stdin ಠ_ಠ')
                 exit(0)
-            if line == "":
+            if line == '':
                 continue
             cmd, *args = shlex.split(line)
             
-            if cmd == "search" or cmd == "s":
+            if cmd == 'search' or cmd == 's':
                 if len(args) == 0:
-                    print("Usage: >search <filename1> <filename2> ...")
+                    print('Usage: >search <filename1> <filename2> ...')
                     continue
                 
-                self.queue.put(("search", {
-                    "files": args
+                self.queue.put(('search', {
+                    'files': args
                 }))
-            elif cmd == "download" or cmd == "d":
+            elif cmd == 'download' or cmd == 'd':
                 if len(args) == 0:
-                    print("Usage: >download <filename1> <filename2> ...")
+                    print('Usage: >download <filename1> <filename2> ...')
                     continue
 
-                self.queue.put(("download", {
-                    "files": args
+                self.queue.put(('download', {
+                    'files': args
                 }))
-            elif cmd == "quit":
-                self.queue.put(("quit", {}))
+            elif cmd == 'quit':
+                self.queue.put(('quit', {}))
             else:
-                print("Usage: >(search|download) <filename1> <filename2> ...")
+                print('Usage: >(search|download) <filename1> <filename2> ...')
 
     def stop(self):
         self.running = False
@@ -73,25 +73,24 @@ class DirectoryObserver(threading.Thread):
         self.running = True
 
     def run(self):
-        scan = lambda p: set([f.name for f in p.glob("*") if f.is_file()])
-        # files = set([f.name for f in self.path.glob("*") if f.is_file()])  # list (non-recursive) all files in directory
+        scan = lambda p: set([f.name for f in p.glob('*') if f.is_file()])  # list (non-recursive) all files in directory
         files = scan(self.path)
         old = files
-        self.queue.put(("insert", {
-            "files": list(files)
+        self.queue.put(('insert', {
+            'files': list(files)
         }))
         while self.running:
             new = files - old
             removed = old - files
             if new:  # new files detected
-                print("new: %s" % new)
-                self.queue.put(("insert", {
-                    "files": list(new)
+                print('new: %s' % new)
+                self.queue.put(('insert', {
+                    'files': list(new)
                 }))
             if removed:  # removed files detected
-                print("delete: %s" % removed)
-                self.queue.put(("delete", {
-                    "files": list(removed)
+                print('delete: %s' % removed)
+                self.queue.put(('delete', {
+                    'files': list(removed)
                 }))
             old = files
             files = scan(self.path)
@@ -102,7 +101,7 @@ class DirectoryObserver(threading.Thread):
 
 
 def parse_config(argv):
-    config_path = Path.cwd() / "naxos.ini"
+    config_path = Path.cwd() / 'naxos.ini'
     host = None
     port = None
     naxos_path = None
@@ -114,13 +113,12 @@ def parse_config(argv):
             host = config['naxos']['host_ip']
             port = config['naxos']['host_port']
             naxos_path = Path(config['naxos']['naxos_directory'])
-
-        except Exception as e:
+        except:
             print('Malformatted ini file.')
             exit(0)
     else:  # try to read the necessary parameters from args
         try:
-            host, port = argv[1].split(":")
+            host, port = argv[1].split(':')
             naxos_path = Path(argv[2])
         except:
             print('Usage: python client.py <naxos peer host>:<naxos peer port> <"path to naxos directory">')
@@ -133,13 +131,13 @@ def parse_config(argv):
         print('host ip is not a well formed ip address.')
         exit(0)
     if not naxos_path.is_dir():
-        print("provided naxos directory is not a directory.")
+        print('provided naxos directory is not a directory.')
         exit(0)
     if not port.isdigit():
-        print("provided port is not a valid positive number.")
+        print('provided port is not a valid positive number.')
         exit(0)
     elif not (1024 <= int(port) <= 65535):
-        print("provided port is not a valid port.")
+        print('provided port is not a valid port.')
         exit(0)
     port = int(port)
     addr = (host, port)
@@ -149,38 +147,38 @@ def parse_config(argv):
 
 def handle_queue(queue, sock, conn):
     cmd, payload = queue.get()
-    if cmd == "quit":
+    if cmd == 'quit':
         dir_observer.stop()
         input_thread.stop()
         sock.close()
         exit(0)
 
-    elif cmd == "insert":
+    elif cmd == 'insert':
         conn.send(Message({
-            "do": "client_insert",
-            "files": payload["files"]
+            'do': 'client_insert',
+            'files': payload['files']
         }))
-    elif cmd == "delete":
+    elif cmd == 'delete':
         conn.send(Message({
-            "do": "client_delete",
-            "files": payload["files"]
+            'do': 'client_delete',
+            'files': payload['files']
         }))
 
-    elif cmd == "search":
+    elif cmd == 'search':
         conn.send(Message({
-            "do": "client_search",
-            "files": payload["files"]
+            'do': 'client_search',
+            'files': payload['files']
         }))
-    elif cmd == "download":
+    elif cmd == 'download':
         conn.send(Message({
-            "do": "client_download",
-            "files": payload["files"]
+            'do': 'client_download',
+            'files': payload['files']
         }))
     else:
-        raise ValueError("Unexpected command.")
+        raise ValueError('Unexpected command.')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     addr, naxos_path = parse_config(sys.argv)
 
     selector = selectors.DefaultSelector()
