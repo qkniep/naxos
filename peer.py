@@ -18,6 +18,7 @@ class Peer(threading.Thread):
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.queue, selectors.EVENT_READ)
         self.network = NetworkNode(self.selector)
+        # TODO: use address (IP+Port) instead of PRNG to derive unique node_id
         self.paxos = PaxosNode(self.network, random.getrandbits(128), len(self.network.connections)+1)
         self.running = True
 
