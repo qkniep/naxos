@@ -21,11 +21,12 @@ class NetworkNode:
         self.upnp.discoverdelay = 10
         self.upnp.discover()
         self.upnp.selectigd()
+
         host = self.upnp.lanaddr  # TODO: register port forwarding on local address but give peers global address
-        port = self.DEFAULT_PORT
-        self.register_forwarding(host, port)
-        self.listen_sock = create_listening_socket(host, port)
+        self.listen_sock, port = create_listening_socket(host, self.DEFAULT_PORT)
         self.listen_addr = (self.upnp.externalipaddress(), port)
+        
+        self.register_forwarding(host, port)
 
         self.selector = selector
         self.selector.register(self.listen_sock, selectors.EVENT_READ)
@@ -108,7 +109,8 @@ class NetworkNode:
     def broadcast(self, payload):
         print('NUMBER OF CONNECTIONS: ', len(self.connections))
         for conn in self.connections.values():
-            conn.send(Message(payload))
+            if conn.is_synchronized():
+                conn.send(Message(payload))
 
     def register_forwarding(self, host, port):
         # addportmapping(external-port, protocol, internal-host, internal-port, description, remote-host)
@@ -131,14 +133,30 @@ class NetworkNode:
         return random.choice(list(self.connections.keys()))
 
 
-def create_listening_socket(host, port):
-    print('Start listening:', (host, port))
-    log.debug('listening on (%s, %s)' % (host, port))
+# def create_listening_socket(host, port):
+#     print('Start listening:', (host, port))
+#     log.debug('listening on (%s, %s)' % (host, port))
+#     try:
+#         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#         sock.bind((host, port))
+#         sock.listen()
+#         sock.setblocking(False)
+#         return sock
+#     except Exception as e:
+#         print('Could not open listening socket:', e)
+
+def create_listening_socket(host, port=0):
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind((host, port))
         sock.listen()
         sock.setblocking(False)
-        return sock
+        _port = sock.getsockname()[1]
+        print('Start listening:', (host, _port))
+        log.debug('listening on (%s, %s)' % (host, _port))
+
+        return sock, _port
     except Exception as e:
         print('Could not open listening socket:', e)
+        if port != 0:  # try again with any port, but only once.
+            return create_listening_socket(host)
