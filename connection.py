@@ -37,7 +37,7 @@ class Connection:
         self.in_buf = b''
 
     def send(self, msg):
-        print('[OUT]:\t%s' % msg.serialize())
+        log.debug('[OUT]:\t%s' % msg.serialize())
         self.out_buf += util.encode_data(msg.serialize()) + util.DELIMITER
 
     def flush_out_buffer(self):

@@ -2,7 +2,7 @@ venv
 .idea
 .vscode
 __pycache__
-debug.log
+*.log
 naxos.code-workspace
 test.py
 echo_server.py

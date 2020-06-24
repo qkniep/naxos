@@ -133,18 +133,6 @@ class NetworkNode:
         return random.choice(list(self.connections.keys()))
 
 
-# def create_listening_socket(host, port):
-#     print('Start listening:', (host, port))
-#     log.debug('listening on (%s, %s)' % (host, port))
-#     try:
-#         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-#         sock.bind((host, port))
-#         sock.listen()
-#         sock.setblocking(False)
-#         return sock
-#     except Exception as e:
-#         print('Could not open listening socket:', e)
-
 def create_listening_socket(host, port=0):
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

@@ -89,6 +89,7 @@ class Peer(threading.Thread):
         elif cmd == 'index_search':
             self.network.send(sock.getpeername(), {
                 'do': 'index_search_result',
+                'query': msg['filename'],  # in case of multiple searches, out of order...
                 'addr': self.index.search_entry(msg['filename']),
             })
         elif cmd == 'index_add':
@@ -134,7 +135,7 @@ class Peer(threading.Thread):
 
 if __name__ == '__main__':
     if not len(sys.argv) in range(2,4):
-        print("Usage: python peer.py (server|ip port)")
+        print('Usage: python peer.py (server|ip port)')
         exit(0)
 
     log.basicConfig(level=log.DEBUG, filename='debug.log')

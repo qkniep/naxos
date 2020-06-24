@@ -98,7 +98,7 @@ class DirectoryObserver(threading.Thread):
                 files = scan(self.path)
                 time.sleep(self.CHECK_INTERVAL)
         finally:
-            print("shutting down observer. :<")
+            print('shutting down observer. :<')
 
     def stop(self):
         self.running = False
@@ -158,28 +158,28 @@ def handle_queue(queue, sock, conn):
         exit(0)
 
     elif cmd == 'insert':
-        for f in payload["files"]:
+        for f in payload['files']:
             conn.send(Message({
                 'do': 'index_add',
                 'filename': f
             }))
     
     elif cmd == 'delete':
-        for f in payload["files"]:
+        for f in payload['files']:
             conn.send(Message({
                 'do': 'index_remove',
                 'filename': f
             }))
 
     elif cmd == 'search':
-        for f in payload["files"]:
+        for f in payload['files']:
             conn.send(Message({
                 'do': 'index_search',
                 'filename': f
             }))
         
     elif cmd == 'download':  # TODO: this makes no sense, download should search and use the answer to make an http request to the provided ip
-        print("TODO")
+        print('TODO')
         # conn.send(Message({
         #     'do': 'client_download',
         #     'files': payload['files']
@@ -201,13 +201,13 @@ def handle_data(data):
 
 
 def handle_response(message):
-    cmd = msg["do"]
+    cmd = msg['do']
     
-    if cmd == "index_search_result":
-        if msg["addr"] is not None:
-            print("Found results for query: %s" % msg["query"])
+    if cmd == 'index_search_result':
+        if msg['addr'] is not None:
+            print('Found results for query: %s' % msg['query'])
         else:
-            print("No results found for query: %s" % msg["query"])
+            print('No results found for query: %s' % msg['query'])
 
 
 
@@ -239,7 +239,7 @@ if __name__ == '__main__':
         exit(0)
     conn = Connection(sock, known=True)
     conn.send(Message({
-        "do": "client_hello"
+        'do': 'client_hello'
     }))
 
     try:
@@ -271,4 +271,4 @@ if __name__ == '__main__':
     finally:
         dir_observer.stop()
         input_thread.stop()
-        print("Exiting...")
+        print('Exiting...')
