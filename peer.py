@@ -133,6 +133,9 @@ class Peer(threading.Thread):
 
 
 if __name__ == '__main__':
+    if not len(sys.argv) in range(2,4):
+        print("Usage: python peer.py (server|ip port)")
+        exit(0)
 
     log.basicConfig(level=log.DEBUG, filename='debug.log')
     peer = Peer()
