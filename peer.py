@@ -17,7 +17,7 @@ class Peer(Thread):
     VERSION = '0.2.0'
 
     def __init__(self):
-        super.__init__()
+        super().__init__()
 
         self.queue = util.PollableQueue()
         self.selector = selectors.DefaultSelector()
