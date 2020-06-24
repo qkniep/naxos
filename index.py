@@ -8,7 +8,7 @@ class Index():
         # TODO: self.reverse_index = {}  // map client addr -> filename
 
     def search_entry(self, filename):
-        return self.index[filename]
+        return self.index.get(filename)
 
     def add_entry(self, filename, addr):
         self.index[filename] = addr
