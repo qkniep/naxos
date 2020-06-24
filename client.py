@@ -6,10 +6,9 @@ import selectors
 import shlex
 import socket
 import sys
-import threading
 import time
-
 from pathlib import Path
+from threading import Thread
 
 import util
 from connection import Connection
@@ -19,7 +18,7 @@ from message import Message
 SELECT_TIMEOUT = 2
 RECV_BUFFER = 1024
 
-class InputThread(threading.Thread):
+class InputThread(Thread):
 
     def __init__(self, queue):
         super().__init__()
@@ -37,12 +36,12 @@ class InputThread(threading.Thread):
             if line == '':
                 continue
             cmd, *args = shlex.split(line)
-            
+
             if cmd == 'search' or cmd == 's':
                 if len(args) == 0:
                     print('Usage: > search <filename1> <filename2> ...')
                     continue
-                
+
                 self.queue.put(('search', {
                     'files': args
                 }))
@@ -60,10 +59,10 @@ class InputThread(threading.Thread):
                 print('Usage: > (search|download) <filename1> <filename2> ...')
 
     def stop(self):
-        self.running = False
+        self.running = False  # TODO: is this thread safe? (we read this variable in run)
 
 
-class DirectoryObserver(threading.Thread):
+class DirectoryObserver(Thread):
     CHECK_INTERVAL = 1
 
     def __init__(self, path, queue):
@@ -101,7 +100,7 @@ class DirectoryObserver(threading.Thread):
             print('shutting down observer. :<')
 
     def stop(self):
-        self.running = False
+        self.running = False  # TODO: is this thread safe? (we read this variable in run)
 
 
 def parse_config(argv):
@@ -109,7 +108,7 @@ def parse_config(argv):
     host = None
     port = None
     naxos_path = None
-    
+
     if len(argv) == 1 and config_path.is_file():  # try to read the provided config file
         try:
             config = configparser.ConfigParser()
@@ -118,8 +117,7 @@ def parse_config(argv):
             port = config['naxos']['host_port']
             naxos_path = Path(config['naxos']['naxos_directory'])
         except:
-            print('Malformatted ini file.')
-            exit(0)
+            sys.exit('Malformatted ini file.')
     else:  # try to read the necessary parameters from args
         try:
             host, port = argv[1].split(':')
@@ -132,17 +130,13 @@ def parse_config(argv):
     # sanity check
     pattern = r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$'  # ipv4
     if not re.match(pattern, host):
-        print('host ip is not a well formed ip address.')
-        exit(0)
+        sys.exit('host ip is not a well formed ip address.')
     if not naxos_path.is_dir():
-        print('provided naxos directory is not a directory.')
-        exit(0)
+        sys.exit('provided naxos directory is not a directory.')
     if not port.isdigit():
-        print('provided port is not a valid positive number.')
-        exit(0)
+        sys.exit('provided port is not a valid positive number.')
     elif not (1024 <= int(port) <= 65535):
-        print('provided port is not a valid port.')
-        exit(0)
+        sys.exit('provided port is not a valid port.')
     port = int(port)
     addr = (host, port)
 
@@ -163,7 +157,7 @@ def handle_queue(queue, sock, conn):
                 'do': 'index_add',
                 'filename': f
             }))
-    
+
     elif cmd == 'delete':
         for f in payload['files']:
             conn.send(Message({
@@ -177,7 +171,7 @@ def handle_queue(queue, sock, conn):
                 'do': 'index_search',
                 'filename': f
             }))
-        
+
     elif cmd == 'download':  # TODO: this makes no sense, download should search and use the answer to make an http request to the provided ip
         print('TODO')
         # conn.send(Message({
@@ -202,7 +196,7 @@ def handle_data(data):
 
 def handle_response(message):
     cmd = msg['do']
-    
+
     if cmd == 'index_search_result':
         if msg['addr'] is not None:
             print('Found results for query: %s' % msg['query'])
@@ -256,7 +250,6 @@ if __name__ == '__main__':
                                 for msg in handle_data(recv_data):
                                     log.debug(msg)
                                     handle_response(msg)
-                                    
                             else:  # connection closed
                                 selector.unregister(sock)
                                 sock.close()

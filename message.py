@@ -1,4 +1,5 @@
-import copy, json
+import copy
+import json
 
 
 class Message(dict):

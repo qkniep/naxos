@@ -1,5 +1,9 @@
 import logging as log
-import random, selectors, sys, socket, threading
+import random
+import selectors
+import sys
+import socket
+from threading import Thread
 
 from index import Index
 from network import NetworkNode
@@ -7,13 +11,13 @@ from paxos import PaxosNode
 import util
 
 
-class Peer(threading.Thread):
+class Peer(Thread):
 
     SELECT_TIMEOUT = 1
     VERSION = '0.2.0'
 
     def __init__(self):
-        threading.Thread.__init__(self)
+        super.__init__()
 
         self.queue = util.PollableQueue()
         self.selector = selectors.DefaultSelector()
@@ -120,7 +124,7 @@ class Peer(threading.Thread):
         }))
 
     def on_close(self):
-        self.running = False
+        self.running = False  # TODO: is this thread safe? (we read this variable in run)
         while not self.network.is_done():
             pass
 
@@ -135,8 +139,7 @@ class Peer(threading.Thread):
 
 if __name__ == '__main__':
     if not len(sys.argv) in range(2,4):
-        print('Usage: python peer.py (server|ip port)')
-        exit(0)
+        sys.exit('Usage: python peer.py (server|ip port)')
 
     log.basicConfig(level=log.DEBUG, filename='debug.log')
     peer = Peer()

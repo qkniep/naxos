@@ -1,5 +1,8 @@
 import logging as log
-import random, selectors, socket, types
+import random
+import selectors
+import socket
+import types
 
 import miniupnpc
 
@@ -25,7 +28,7 @@ class NetworkNode:
         host = self.upnp.lanaddr  # TODO: register port forwarding on local address but give peers global address
         self.listen_sock, port = create_listening_socket(host, self.DEFAULT_PORT)
         self.listen_addr = (self.upnp.externalipaddress(), port)
-        
+
         self.register_forwarding(host, port)
 
         self.selector = selector

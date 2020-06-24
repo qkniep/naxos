@@ -1,4 +1,7 @@
-import base64, os, queue, socket
+import base64
+import os
+from queue import Queue
+import socket
 
 
 DELIMITER = b'|'
@@ -20,7 +23,7 @@ def get_key(host, port):
 #  -> write a byte into it on every put, read one on every get
 #  ...kinda sad but it's windows.
 # TODO: is get/put thread-safe if both thread get/put?
-class PollableQueue(queue.Queue):
+class PollableQueue(Queue):
     def __init__(self):
         super().__init__()
         # Create a pair of connected sockets
