@@ -1,4 +1,5 @@
 import configparser
+import logging as log
 import os
 import re
 import selectors
@@ -39,7 +40,7 @@ class InputThread(threading.Thread):
             
             if cmd == 'search' or cmd == 's':
                 if len(args) == 0:
-                    print('Usage: >search <filename1> <filename2> ...')
+                    print('Usage: > search <filename1> <filename2> ...')
                     continue
                 
                 self.queue.put(('search', {
@@ -47,7 +48,7 @@ class InputThread(threading.Thread):
                 }))
             elif cmd == 'download' or cmd == 'd':
                 if len(args) == 0:
-                    print('Usage: >download <filename1> <filename2> ...')
+                    print('Usage: > download <filename1> <filename2> ...')
                     continue
 
                 self.queue.put(('download', {
@@ -56,7 +57,7 @@ class InputThread(threading.Thread):
             elif cmd == 'quit':
                 self.queue.put(('quit', {}))
             else:
-                print('Usage: >(search|download) <filename1> <filename2> ...')
+                print('Usage: > (search|download) <filename1> <filename2> ...')
 
     def stop(self):
         self.running = False
@@ -79,22 +80,25 @@ class DirectoryObserver(threading.Thread):
         self.queue.put(('insert', {
             'files': list(files)
         }))
-        while self.running:
-            new = files - old
-            removed = old - files
-            if new:  # new files detected
-                print('new: %s' % new)
-                self.queue.put(('insert', {
-                    'files': list(new)
-                }))
-            if removed:  # removed files detected
-                print('delete: %s' % removed)
-                self.queue.put(('delete', {
-                    'files': list(removed)
-                }))
-            old = files
-            files = scan(self.path)
-            time.sleep(self.CHECK_INTERVAL)
+        try:
+            while self.running:
+                new = files - old
+                removed = old - files
+                if new:  # new files detected
+                    print('new: %s' % new)
+                    self.queue.put(('insert', {
+                        'files': list(new)
+                    }))
+                if removed:  # removed files detected
+                    print('delete: %s' % removed)
+                    self.queue.put(('delete', {
+                        'files': list(removed)
+                    }))
+                old = files
+                files = scan(self.path)
+                time.sleep(self.CHECK_INTERVAL)
+        finally:
+            print("shutting down observer. :<")
 
     def stop(self):
         self.running = False
@@ -154,31 +158,64 @@ def handle_queue(queue, sock, conn):
         exit(0)
 
     elif cmd == 'insert':
-        conn.send(Message({
-            'do': 'client_insert',
-            'files': payload['files']
-        }))
+        for f in payload["files"]:
+            conn.send(Message({
+                'do': 'index_add',
+                'filename': f
+            }))
+    
     elif cmd == 'delete':
-        conn.send(Message({
-            'do': 'client_delete',
-            'files': payload['files']
-        }))
+        for f in payload["files"]:
+            conn.send(Message({
+                'do': 'index_remove',
+                'filename': f
+            }))
 
     elif cmd == 'search':
-        conn.send(Message({
-            'do': 'client_search',
-            'files': payload['files']
-        }))
-    elif cmd == 'download':
-        conn.send(Message({
-            'do': 'client_download',
-            'files': payload['files']
-        }))
+        for f in payload["files"]:
+            conn.send(Message({
+                'do': 'index_search',
+                'filename': f
+            }))
+        
+    elif cmd == 'download':  # TODO: this makes no sense, download should search and use the answer to make an http request to the provided ip
+        print("TODO")
+        # conn.send(Message({
+        #     'do': 'client_download',
+        #     'files': payload['files']
+        # }))
+
     else:
         raise ValueError('Unexpected command.')
 
 
+def handle_data(data):
+    global BUFFER
+    splitted = data.split(util.DELIMITER)  # it could happen that we receive multiple messages in one chunk
+    for i, msg_chunk in enumerate(splitted):
+        BUFFER += msg_chunk
+        if i == len(splitted)-1:  # last one is either incomplete or empty string, so no parsing in this case
+            break
+        yield Message.deserialize(util.decode_data(BUFFER))
+        BUFFER = b''
+
+
+def handle_response(message):
+    cmd = msg["do"]
+    
+    if cmd == "index_search_result":
+        if msg["addr"] is not None:
+            print("Found results for query: %s" % msg["query"])
+        else:
+            print("No results found for query: %s" % msg["query"])
+
+
+
+BUFFER = b''
+
 if __name__ == '__main__':
+    log.basicConfig(level=log.DEBUG, filename='client_debug.log')
+
     addr, naxos_path = parse_config(sys.argv)
 
     selector = selectors.DefaultSelector()
@@ -197,29 +234,41 @@ if __name__ == '__main__':
         selector.register(sock, selectors.EVENT_READ | selectors.EVENT_WRITE)
     except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as e:
         print('Could not establish connection to (%s, %s):' % addr, e)
+        dir_observer.stop()
+        input_thread.stop()
         exit(0)
     conn = Connection(sock, known=True)
+    conn.send(Message({
+        "do": "client_hello"
+    }))
 
-    while True:
-        events = selector.select(timeout=SELECT_TIMEOUT)
-        for key, mask in events:
-            if key.fileobj is queue:
-                handle_queue(queue, sock, conn)
-            elif key.fileobj is sock:
-                if mask & selectors.EVENT_READ:
-                    try:
-                        recv_data = sock.recv(RECV_BUFFER)
-                        if recv_data:
-                            print(recv_data)
-                            # TODO: handle data properly
-                        else:  # connection closed
+    try:
+        while True:
+            events = selector.select(timeout=SELECT_TIMEOUT)
+            for key, mask in events:
+                if key.fileobj is queue:
+                    handle_queue(queue, sock, conn)
+                elif key.fileobj is sock:
+                    if mask & selectors.EVENT_READ:
+                        try:
+                            recv_data = sock.recv(RECV_BUFFER)
+                            if recv_data:
+                                for msg in handle_data(recv_data):
+                                    log.debug(msg)
+                                    handle_response(msg)
+                                    
+                            else:  # connection closed
+                                selector.unregister(sock)
+                                sock.close()
+                                exit(0)
+                        except (ConnectionResetError, ConnectionAbortedError):
+                            print('Connection reset/aborted:', addr)
                             selector.unregister(sock)
                             sock.close()
                             exit(0)
-                    except (ConnectionResetError, ConnectionAbortedError):
-                        print('Connection reset/aborted:', addr)
-                        selector.unregister(sock)
-                        sock.close()
-                        exit(0)
-                if mask & selectors.EVENT_WRITE:
-                    conn.flush_out_buffer()
+                    if mask & selectors.EVENT_WRITE:
+                        conn.flush_out_buffer()
+    finally:
+        dir_observer.stop()
+        input_thread.stop()
+        print("Exiting...")
