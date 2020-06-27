@@ -1,14 +1,23 @@
 import configparser
+import functools
+import http.server
 import logging as log
 import os
+import random
 import re
 import selectors
 import shlex
+import shutil
 import socket
+import socketserver
 import sys
 import time
+import urllib.request
+
 from pathlib import Path
 from threading import Thread
+
+import miniupnpc
 
 import util
 from connection import Connection
@@ -143,7 +152,7 @@ def parse_config(argv):
     return addr, naxos_path
 
 
-def handle_queue(queue, sock, conn):
+def handle_queue(queue, naxos_path, sock, conn):
     cmd, payload = queue.get()
     if cmd == 'quit':
         dir_observer.stop()
@@ -173,14 +182,33 @@ def handle_queue(queue, sock, conn):
             }))
 
     elif cmd == 'download':  # TODO: this makes no sense, download should search and use the answer to make an http request to the provided ip
-        print('TODO')
-        # conn.send(Message({
-        #     'do': 'client_download',
-        #     'files': payload['files']
-        # }))
-
+        for f in payload['files']:
+            addr = RESULTS.get(f)
+            if addr is not None:
+                print('Using cached address (%s:%s) for %s' % (f))
+                download(naxos_path, f, addr)
+            else:
+                print('You have to search for the file first.')  # TODO: Auto-search
     else:
         raise ValueError('Unexpected command.')
+
+
+def download(path, filename, addr):
+    host, port = addr
+    url = 'http://%s:%s/%s' % (host, port, filename)
+
+    if (path / filename).exists:  # check if filename already used
+        i = 0
+        while (path / "%s_%s" % (filename, i)).exists:  # find one that is unused
+            i += 1
+        filename = "%s_%s" % (filename, i)
+        print("Saving file as %s." % filename)
+    
+    try:  # open url, write response to file
+        with urllib.request.urlopen(url) as response, open(path / filename, 'wb') as out_file:
+            shutil.copyfileobj(response, out_file)
+    except:
+        print("Error while downloading file %s." % filename)
 
 
 def handle_data(data):
@@ -198,13 +226,43 @@ def handle_response(message):
     cmd = msg['do']
 
     if cmd == 'index_search_result':
-        if msg['addr'] is not None:
-            print('Found results for query: %s' % msg['query'])
+        addr = msg['addr']
+        query = msg['query']
+        if addr is not None:
+            print('Found results for query: %s' % query)
+            RESULTS[query] = addr
         else:
             print('No results found for query: %s' % msg['query'])
 
 
+def determine_http_addr(upnp):
+        host = upnp.lanaddr
+        while True:
+            port = random.randint(1024, 65535)  # random port
+            try:
+                upnp.addportmapping(port, 'TCP', host, port, 'Naxos HTTP Server', '')
+                break  # no exception, so mapping worked
+            except:
+                pass
+        remove_mapping = lambda: upnp.deleteportmapping(port, 'TCP', 'Naxos')
+        return (host, port), remove_mapping
 
+
+
+def get_httpd(path):
+    Handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=path)
+
+    upnp = miniupnpc.UPnP()
+    upnp.discoverdelay = 10
+    upnp.discover()
+    upnp.selectigd()
+
+    (host, port), remove_mapping = determine_http_addr(upnp)
+
+    return socketserver.TCPServer((host, port), Handler), remove_mapping, (host, port)
+
+
+RESULTS = {}
 BUFFER = b''
 
 if __name__ == '__main__':
@@ -221,27 +279,30 @@ if __name__ == '__main__':
     input_thread.start()
     dir_observer = DirectoryObserver(naxos_path, queue)
     dir_observer.start()
+    _httpd, remove_mapping, http_addr = get_httpd(str(naxos_path))
+    httpd = Thread(target=_httpd.serve_forever)
+    httpd.setDaemon(True)
+    httpd.start()
 
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect(addr)
-        selector.register(sock, selectors.EVENT_READ | selectors.EVENT_WRITE)
-    except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as e:
-        print('Could not establish connection to (%s, %s):' % addr, e)
-        dir_observer.stop()
-        input_thread.stop()
-        exit(0)
-    conn = Connection(sock, known=True)
-    conn.send(Message({
-        'do': 'client_hello'
-    }))
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect(addr)
+            selector.register(sock, selectors.EVENT_READ | selectors.EVENT_WRITE)
+        except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as e:
+            print('Could not establish connection to (%s, %s):' % addr, e)
+            raise Exception()
+        conn = Connection(sock, known=True)
+        conn.send(Message({
+            'do': 'client_hello',
+            'http_addr': http_addr
+        }))
 
-    try:
         while True:
             events = selector.select(timeout=SELECT_TIMEOUT)
             for key, mask in events:
                 if key.fileobj is queue:
-                    handle_queue(queue, sock, conn)
+                    handle_queue(queue, naxos_path, sock, conn)
                 elif key.fileobj is sock:
                     if mask & selectors.EVENT_READ:
                         try:
@@ -264,4 +325,8 @@ if __name__ == '__main__':
     finally:
         dir_observer.stop()
         input_thread.stop()
+
+        # stop http server and remove upnp mapping
+        _httpd.shutdown()
+        remove_mapping()
         print('Exiting...')
