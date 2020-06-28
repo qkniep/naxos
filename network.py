@@ -2,6 +2,7 @@ import logging as log
 import random
 import selectors
 import socket
+import struct
 import types
 
 import miniupnpc
@@ -126,6 +127,11 @@ class NetworkNode:
 
     def get_random_listen_addr(self):
         return random.choice(list(self.connections.values())).remote_listen_addr,
+
+    def unique_id_from_own_addr(self):
+        ip, port = self.listen_sock.getsockname()
+        ip_num = struct.unpack("!I", socket.inet_aton(ip))[0]
+        return ip_num * 65536 + port
 
 
 def create_listening_socket(host, port=0):

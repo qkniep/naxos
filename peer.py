@@ -1,5 +1,4 @@
 import logging as log
-import random
 import selectors
 import sys
 import socket
@@ -24,11 +23,8 @@ class Peer(Thread):
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.queue, selectors.EVENT_READ)
         self.network = NetworkNode(self.selector)
-        # TODO: use address (IP+Port) instead of PRNG to derive unique node_id
         if first:
-            self.paxos = PaxosNode(self, self.network, random.getrandbits(128), 1)
-        else:
-            self.paxos = None
+            self.paxos = PaxosNode(self, self.network, 1)
         self.index = Index()
         self.running = True
 
@@ -62,7 +58,7 @@ class Peer(Thread):
 
         cmd = msg['do']
         if cmd == 'paxos_join_confirm':
-            self.paxos = PaxosNode(self, self.network, random.getrandbits(128), msg['group_size'])
+            self.paxos = PaxosNode(self, self.network, msg['group_size'])
             self.index.fromJSON(msg['index'])
             peers = [tuple(p) for p in msg['peers']]
             for addr in peers:

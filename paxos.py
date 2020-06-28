@@ -1,6 +1,7 @@
 class PaxosNode:
 
-    def __init__(self, peer, network_node, node_id, num_peers):
+    def __init__(self, peer, network_node, num_peers):
+        node_id = network_node.unique_id_from_own_addr()
         print('This peer is now operating Paxos node %i in a group of size %i' % (node_id, num_peers))
         self.peer = peer  # TODO: remove this
         self.network_node = network_node
