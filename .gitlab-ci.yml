@@ -1,7 +1,7 @@
 pylint:
   stage: test
   before_script:
-    - pip install pylint pylint-exit anybadge
+    - python -m pip install pylint pylint-exit anybadge
   script:
     - mkdir ./pylint
     - pylint --output-format=text . | tee ./pylint/pylint.log || pylint-exit $?
