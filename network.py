@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+"""Network abstraction."""
+
 import logging as log
 import random
 import selectors
@@ -13,6 +16,7 @@ from message import Message
 
 class NetworkNode:
     """Wrapper for socket API and uPnP.
+
     Listen for incoming connections, establish connections to other network nodes.
     """
 
@@ -46,7 +50,7 @@ class NetworkNode:
         register it with the selector and add it to the connections map.
         """
         sock, addr = self.listen_sock.accept()
-        log.debug('accepted connection from %s' % str(addr))
+        log.debug('accepted connection from %s', str(addr))
         sock.setblocking(False)
         events = selectors.EVENT_READ | selectors.EVENT_WRITE
         self.selector.register(sock, events)
@@ -65,7 +69,7 @@ class NetworkNode:
                 if recv_data:
                     yield from conn.handle_data(recv_data)
                 else:  # connection closed by peer
-                    log.debug('closing connection to %s' % str(addr))
+                    log.debug('closing connection to %s', str(addr))
                     self.close_connection(addr)
             except (ConnectionResetError, ConnectionAbortedError):
                 print('Connection reset/aborted:', addr)
@@ -142,11 +146,11 @@ class NetworkNode:
         return self.connections[addr].sock
 
     def get_random_listen_addr(self):
-        return random.choice(list(self.connections.values())).remote_listen_addr,
+        return random.choice(list(self.connections.values())).remote_listen_addr
 
     def unique_id_from_own_addr(self):
-        ip, port = self.listen_sock.getsockname()
-        ip_num = struct.unpack("!I", socket.inet_aton(ip))[0]
+        ip_addr, port = self.listen_sock.getsockname()
+        ip_num = struct.unpack("!I", socket.inet_aton(ip_addr))[0]
         return ip_num * 65536 + port
 
 
@@ -161,9 +165,9 @@ def create_listening_socket(host, port=0):
         sock.setblocking(False)
         _port = sock.getsockname()[1]
         print('This peer is listening for incoming connections on:', (host, _port))
-        log.debug('listening on (%s, %s)' % (host, _port))
+        log.debug('listening on (%s, %s)', host, _port)
 
         return sock, _port
-    except Exception as e:
-        log.debug('could not open listening socket: %s' % e)
+    except Exception as exception:
+        log.debug('could not open listening socket: %s', exception)
         return create_listening_socket(host)

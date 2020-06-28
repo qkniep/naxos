@@ -1,26 +1,38 @@
-class PaxosNode:
+# -*- coding: utf-8 -*-
+"""Paxos distributed consensus protocol, currently only Single-Paxos w/o leader."""
 
-    def __init__(self, peer, network_node, num_peers):
+class PaxosNode:
+    """Maintains paxos state
+    """
+
+    def __init__(self, network_node, num_peers=1):
+        """Initializes a new paxos node."""
         node_id = network_node.unique_id_from_own_addr()
-        print('This peer is now operating Paxos node %i in a group of size %i' % (node_id, num_peers))
-        self.peer = peer  # TODO: remove this
+        print('This peer is now operating Paxos node', node_id)
+        print('Paxos group size is', num_peers)
         self.network_node = network_node
         self.group_size = num_peers
         self.current_id = (0, node_id)
         self.highest_promised = (0, 0)
+        self.promises = 1
+        self.acceptances = 1
         self.accepted_value = None
         self.chosen = False
 
     def start_paxos_round(self, value):
+        """Starts a paxos round by sending the prepare.
+        Ultimately we try to get value chosen.
+        """
         self.current_id = (self.current_id[0] + 1, self.current_id[1])
         self.network_node.broadcast({
             'do': 'paxos_prepare',
             'id': self.current_id,
         })
-        self.accepted_value = value
+        self.accepted_value = value  # XXX
         self.promises = 1
 
     def handle_prepare(self, src, proposal_id):
+        """Handles a paxos prepare message."""
         if proposal_id < self.highest_promised:
             print('Rejecting Prepare: proposal_id < highest_promised')
             return
@@ -32,12 +44,13 @@ class PaxosNode:
         })
 
     def handle_promise(self, proposal_id, value):
+        """Handle a paxos promise message."""
         if proposal_id != self.current_id:
             print('Rejecting Promise: proposal_id != current_id')
             return
         self.promises += 1
         if value is not None:
-            self.accepted_value = value  #???
+            self.accepted_value = value  # XXX
         print(self.majority())
         if self.promises == self.majority():
             self.acceptances = 1
@@ -48,6 +61,7 @@ class PaxosNode:
             })
 
     def handle_propose(self, src, proposal_id, value):
+        """Handles a paxos propose message."""
         if proposal_id < self.highest_promised:
             print('Rejecting Proposal: proposal_id < highest_promised')
             return
@@ -59,20 +73,23 @@ class PaxosNode:
         })
 
     def handle_accept(self, proposal_id):
+        """Handles a paxos accept message."""
         if proposal_id != self.current_id:
             print('Rejecting Accept: proposal_id != current_id')
-            return
+            return None
         self.acceptances += 1
         if self.acceptances == self.majority():
-            self.peer.apply_chosen_value(self.accepted_value, selfStartedRound=True)
             self.network_node.broadcast({
                 'do': 'paxos_learn',
                 'id': proposal_id,
                 'value': self.accepted_value,
             })
             self.chosen = True
+            return self.accepted_value
+        return None
 
-    def handle_learn(self, proposal_id, value):
+    def handle_learn(self, _proposal_id, value):
+        """Handles a paxos learn message."""
         self.accepted_value = value
         self.chosen = True
 

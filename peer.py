@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+"""Overlay P2P network of peers running paxos to maintain a consistent index."""
+
 import logging as log
 import selectors
 import sys
@@ -12,14 +15,15 @@ import util
 
 class Peer(Thread):
     """Overlay network peer maintaining a network node, paxos instances, and an index.
-    Serve as an index server to the clients.
-    Coordinate with peers through paxos to maintain a consistent index.
+    Serves as an index server to the clients.
+    Coordinates with peers through paxos to maintain a consistent index.
     """
 
     SELECT_TIMEOUT = 1
     VERSION = '0.2.0'
 
     def __init__(self, first=False):
+        """"""
         super().__init__()  # Thread constructor
 
         self.queue = util.PollableQueue()
@@ -27,11 +31,12 @@ class Peer(Thread):
         self.selector.register(self.queue, selectors.EVENT_READ)
         self.network = NetworkNode(self.selector)
         if first:
-            self.paxos = PaxosNode(self, self.network, 1)
+            self.paxos = PaxosNode(self.network)
         self.index = Index()
         self.running = True
 
     def run(self):  # called by Thread.start()
+        """Main loop: Handles incoming messages and commands sent from main thread."""
         print('Running Naxos v' + self.VERSION)
         while self.running:
             events = self.selector.select(timeout=self.SELECT_TIMEOUT)
@@ -47,6 +52,7 @@ class Peer(Thread):
         self.network.reset()
 
     def handle_queue(self):
+        """"""
         cmd, payload = self.queue.get()
         if cmd == 'connect':
             self.network.connect_to_node(payload['addr'], 'paxos_join_request')
@@ -54,18 +60,18 @@ class Peer(Thread):
             if self.paxos is not None:
                 self.paxos.start_paxos_round(payload['value'])
         else:
-            raise ValueError('Unknown command:', cmd)
+            raise ValueError('Unknown command: %s' % cmd)
 
     def handle_message(self, sock, msg):
-        """Handle the Message msg, which arrived at the socket sock.
+        """Handles the Message msg, which arrived at the socket sock.
         The message might have been sent by another paxos peer or a client.
         """
         print('[IN]:\t%s' % msg)
 
         cmd = msg['do']
         if cmd == 'paxos_join_confirm':
-            self.paxos = PaxosNode(self, self.network, msg['group_size'])
-            self.index.fromJSON(msg['index'])
+            self.paxos = PaxosNode(self.network, num_peers=msg['group_size'])
+            self.index.from_json(msg['index'])
             peers = [tuple(p) for p in msg['peers']]
             for addr in peers:
                 self.network.connect_to_node(addr)
@@ -101,7 +107,9 @@ class Peer(Thread):
         elif cmd == 'paxos_propose':
             self.paxos.handle_propose(sock.getpeername(), tuple(msg['id']), msg['value'])
         elif cmd == 'paxos_accept':
-            self.paxos.handle_accept(tuple(msg['id']))
+            chosen_value = self.paxos.handle_accept(tuple(msg['id']))
+            if chosen_value is not None:
+                self.apply_chosen_value(chosen_value, self_started_round=True)
         elif cmd == 'paxos_learn':
             self.apply_chosen_value(msg['value'])  # TODO: change broadcast to include localhost
             self.paxos.handle_learn(tuple(msg['id']), msg['value'])
@@ -125,16 +133,19 @@ class Peer(Thread):
                 'entry': msg['filename'],
             })
 
-    def stop(self):
-        if self.network:
-            self.network.stop()
+    def _stop(self):
+        pass
+        #if self.network:
+        #    self.network.stop()
 
     def connect_to_paxos(self, addr):
+        """Adds a 'connect' command to the command queue."""
         self.queue.put(('connect', {
             'addr': addr,
         }))
 
     def run_paxos(self, value):
+        """Adds a 'start_paxos' command to the command queue."""
         self.queue.put(('start_paxos', {
             'value': value,
         }))
@@ -144,10 +155,10 @@ class Peer(Thread):
         while not self.network.is_done():
             pass
 
-    def apply_chosen_value(self, value, selfStartedRound=False):
+    def apply_chosen_value(self, value, self_started_round=False):
         if value['change'] == 'join':
             self.paxos.group_size += 1
-            if selfStartedRound:
+            if self_started_round:
                 self.send_paxos_join_confirmation(tuple(value['respond_addr']))
         elif value['change'] == 'add':
             self.index.add_entry(value['entry'], value['addr'])
@@ -155,23 +166,22 @@ class Peer(Thread):
             self.index.remove_entry(value['entry'])
 
     def send_paxos_join_confirmation(self, addr):
-        peers = list(filter(lambda c: c.sock.getpeername() != addr, self.network.connections.values()))
-        peers = [c.remote_listen_addr for c in peers]
+        peers = [c.remote_listen_addr for a, c in self.network.connections.items() if a != addr]
         self.network.send(addr, {
             'do': 'paxos_join_confirm',
             'group_size': self.paxos.group_size,
-            'index': self.index.toJSON(),
+            'index': self.index.to_json(),
             'peers': peers
         })
 
 
 if __name__ == '__main__':
-    argc = len(sys.argv)
-    if not (argc == 1 or argc == 3):
+    NUM_ARGS = len(sys.argv)
+    if NUM_ARGS not in [1, 3]:
         sys.exit('Usage: python peer.py (ip port)')
 
     log.basicConfig(level=log.DEBUG, filename='debug.log')
-    peer = Peer(argc == 1)
+    peer = Peer(NUM_ARGS == 1)
     peer.start()
-    if argc == 3:
+    if NUM_ARGS == 3:
         peer.connect_to_paxos((sys.argv[1], int(sys.argv[2])))

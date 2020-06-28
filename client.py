@@ -1,8 +1,10 @@
+# -*- coding: utf-8 -*-
+"""Naxos client CLI."""
+
 import configparser
 import functools
 import http.server
 import logging as log
-import os
 import random
 import re
 import selectors
@@ -11,11 +13,11 @@ import shutil
 import socket
 import socketserver
 import sys
+import threading
 import time
 import urllib.request
 
 from pathlib import Path
-from threading import Thread
 
 import miniupnpc
 
@@ -27,9 +29,11 @@ from message import Message
 SELECT_TIMEOUT = 2
 RECV_BUFFER = 1024
 
-class InputThread(Thread):
+class InputThread(threading.Thread):
+    """Thread for handling the user input (stdin)."""
 
     def __init__(self, queue):
+        """"""
         super().__init__()  # Thread constructor
 
         self.queue = queue
@@ -40,13 +44,12 @@ class InputThread(Thread):
             try:
                 line = input('> ')
             except EOFError:
-                print('Encountered EOF in stdin ಠ_ಠ')
-                exit(0)
+                sys.exit(0)
             if line == '':
                 continue
             cmd, *args = shlex.split(line)
 
-            if cmd == 'search' or cmd == 's':
+            if cmd in ('search', 's'):
                 if len(args) == 0:
                     print('Usage: > search <filename1> <filename2> ...')
                     continue
@@ -54,7 +57,7 @@ class InputThread(Thread):
                 self.queue.put(('search', {
                     'files': args
                 }))
-            elif cmd == 'download' or cmd == 'd':
+            elif cmd in ('download', 'd'):
                 if len(args) == 0:
                     print('Usage: > download <filename1> <filename2> ...')
                     continue
@@ -71,7 +74,12 @@ class InputThread(Thread):
         self.running = False  # TODO: is this thread safe? (we read this variable in run)
 
 
-class DirectoryObserver(Thread):
+class DirectoryObserver(threading.Thread):
+    """Thread for handling changes in the naxos directory.
+    Upon start, adds all files in the directory to the index.
+    Upon adding/removing of file to the directory, adds/removes it from the index.
+    """
+
     CHECK_INTERVAL = 1
 
     def __init__(self, path, queue):
@@ -134,7 +142,7 @@ def parse_config(argv):
         except:
             print('Usage: python client.py <naxos peer host>:<naxos peer port> <"path to naxos directory">')
             print('Alternative: python client.py with a naxos.ini file in the same directory')
-            exit(0)
+            sys.exit(0)
 
     # sanity check
     pattern = r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$'  # ipv4
@@ -144,7 +152,7 @@ def parse_config(argv):
         sys.exit('provided naxos directory is not a directory.')
     if not port.isdigit():
         sys.exit('provided port is not a valid positive number.')
-    elif not (1024 <= int(port) <= 65535):
+    elif not 1024 <= int(port) <= 65535:
         sys.exit('provided port is not a valid port.')
     port = int(port)
     addr = (host, port)
@@ -158,35 +166,37 @@ def handle_queue(queue, naxos_path, sock, conn):
         dir_observer.stop()
         input_thread.stop()
         sock.close()
-        exit(0)
+        sys.exit(0)
 
     elif cmd == 'insert':
-        for f in payload['files']:
+        for file in payload['files']:
             conn.send(Message({
                 'do': 'index_add',
-                'filename': f
+                'filename': file
             }))
 
     elif cmd == 'delete':
-        for f in payload['files']:
+        for file in payload['files']:
             conn.send(Message({
                 'do': 'index_remove',
-                'filename': f
+                'filename': file
             }))
 
     elif cmd == 'search':
-        for f in payload['files']:
+        for file in payload['files']:
             conn.send(Message({
                 'do': 'index_search',
-                'filename': f
+                'filename': file
             }))
 
-    elif cmd == 'download':  # TODO: this makes no sense, download should search and use the answer to make an http request to the provided ip
-        for f in payload['files']:
-            addr = RESULTS.get(f)
+    # TODO: this makes no sense, download should search
+    # and use the answer to make an http request to the provided ip
+    elif cmd == 'download':
+        for file in payload['files']:
+            addr = RESULTS.get(file)
             if addr is not None:
-                print('Using cached address (%s:%s) for %s' % (f))
-                download(naxos_path, f, addr)
+                print('Using cached address (%s:%s) for %s' % (file))
+                download(naxos_path, file, addr)
             else:
                 print('You have to search for the file first.')  # TODO: Auto-search
     else:
@@ -199,30 +209,30 @@ def download(path, filename, addr):
 
     if (path / filename).exists:  # check if filename already used
         i = 0
-        while (path / "%s_%s" % (filename, i)).exists:  # find one that is unused
+        while (path / '%s_%s' % (filename, i)).exists:  # find one that is unused
             i += 1
-        filename = "%s_%s" % (filename, i)
-        print("Saving file as %s." % filename)
+        filename = '%s_%s' % (filename, i)
+        print('Saving file as %s.' % filename)
 
     try:  # open url, write response to file
         with urllib.request.urlopen(url) as response, open(path / filename, 'wb') as out_file:
             shutil.copyfileobj(response, out_file)
-    except:
-        print("Error while downloading file %s." % filename)
+    except Exception as error:
+        print('Error while downloading file %s: %s' % (filename, error))
 
 
-def handle_data(data):
+def handle_data(data):  # XXX DRY
     global BUFFER
-    splitted = data.split(util.DELIMITER)  # it could happen that we receive multiple messages in one chunk
+    splitted = data.split(util.DELIMITER)  # works with multiple messages in one chunk
     for i, msg_chunk in enumerate(splitted):
         BUFFER += msg_chunk
-        if i == len(splitted)-1:  # last one is either incomplete or empty string, so no parsing in this case
-            break
+        if i == len(splitted)-1:
+            break  # last one is either incomplete or empty string, so no parsing in this case
         yield Message.deserialize(util.decode_data(BUFFER))
         BUFFER = b''
 
 
-def handle_response(message):
+def handle_response(msg):
     cmd = msg['do']
 
     if cmd == 'index_search_result':
@@ -233,19 +243,6 @@ def handle_response(message):
             RESULTS[query] = addr
         else:
             print('No results found for query: %s' % msg['query'])
-
-
-def determine_http_addr(upnp):
-    host = upnp.lanaddr
-    while True:
-        port = random.randint(1024, 65535)  # random port
-        try:
-            upnp.addportmapping(port, 'TCP', host, port, 'Naxos HTTP Server', '')
-            break  # no exception, so mapping worked
-        except:
-            pass
-    remove_mapping = lambda: upnp.deleteportmapping(port, 'TCP', 'Naxos')
-    return (host, port), remove_mapping
 
 
 def get_httpd(path):
@@ -261,13 +258,26 @@ def get_httpd(path):
     return socketserver.TCPServer((host, port), Handler), remove_mapping, (host, port)
 
 
+def determine_http_addr(upnp):
+    host = upnp.lanaddr
+    while True:
+        port = random.randint(1024, 65535)  # random port
+        try:
+            upnp.addportmapping(port, 'TCP', host, port, 'Naxos HTTP Server', '')
+            break  # no exception, so mapping worked
+        except:
+            pass
+    remove_mapping = lambda: upnp.deleteportmapping(port, 'TCP', 'Naxos')
+    return (host, port), remove_mapping
+
+
 RESULTS = {}
 BUFFER = b''
 
 if __name__ == '__main__':
     log.basicConfig(level=log.DEBUG, filename='client_debug.log')
 
-    addr, naxos_path = parse_config(sys.argv)
+    address, naxos_path = parse_config(sys.argv)
 
     selector = selectors.DefaultSelector()
 
@@ -279,17 +289,17 @@ if __name__ == '__main__':
     dir_observer = DirectoryObserver(naxos_path, queue)
     dir_observer.start()
     _httpd, remove_mapping, http_addr = get_httpd(str(naxos_path))
-    httpd = Thread(target=_httpd.serve_forever)
+    httpd = threading.Thread(target=_httpd.serve_forever)
     httpd.setDaemon(True)
     httpd.start()
 
     try:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect(addr)
+            sock.connect(address)
             selector.register(sock, selectors.EVENT_READ | selectors.EVENT_WRITE)
-        except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as e:
-            print('Could not establish connection to (%s, %s):' % addr, e)
+        except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as exception:
+            print('Could not establish connection to (%s, %s):' % address, exception)
             raise Exception()
         conn = Connection(sock, known=True)
         conn.send(Message({
@@ -307,18 +317,18 @@ if __name__ == '__main__':
                         try:
                             recv_data = sock.recv(RECV_BUFFER)
                             if recv_data:
-                                for msg in handle_data(recv_data):
-                                    log.debug(msg)
-                                    handle_response(msg)
+                                for message in handle_data(recv_data):
+                                    log.debug(message)
+                                    handle_response(message)
                             else:  # connection closed
                                 selector.unregister(sock)
                                 sock.close()
-                                exit(0)
+                                sys.exit(0)
                         except (ConnectionResetError, ConnectionAbortedError):
-                            print('Connection reset/aborted:', addr)
+                            print('Connection reset/aborted:', address)
                             selector.unregister(sock)
                             sock.close()
-                            exit(0)
+                            sys.exit(0)
                     if mask & selectors.EVENT_WRITE:
                         conn.flush_out_buffer()
     finally:
