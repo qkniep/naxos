@@ -4,8 +4,8 @@ import json
 class Index():
 
     def __init__(self):
-        self.index = {}
-        # TODO: self.reverse_index = {}  // map client addr -> filename
+        self.index = {}          # map filename -> client addr
+        #TODO: self.reverse_index = {}  # map client addr -> filenames
 
     def search_entry(self, filename):
         return self.index.get(filename)

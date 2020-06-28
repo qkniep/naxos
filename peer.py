@@ -6,17 +6,17 @@ import socket
 from threading import Thread
 
 from index import Index
+from message import Message
 from network import NetworkNode
 from paxos import PaxosNode
 import util
 
 
 class Peer(Thread):
-
     SELECT_TIMEOUT = 1
     VERSION = '0.2.0'
 
-    def __init__(self):
+    def __init__(self, first=False):
         super().__init__()
 
         self.queue = util.PollableQueue()
@@ -24,7 +24,10 @@ class Peer(Thread):
         self.selector.register(self.queue, selectors.EVENT_READ)
         self.network = NetworkNode(self.selector)
         # TODO: use address (IP+Port) instead of PRNG to derive unique node_id
-        self.paxos = PaxosNode(self.network, random.getrandbits(128), len(self.network.connections)+1)
+        if first:
+            self.paxos = PaxosNode(self, self.network, random.getrandbits(128), 1)
+        else:
+            self.paxos = None
         self.index = Index()
         self.running = True
 
@@ -46,9 +49,10 @@ class Peer(Thread):
     def handle_queue(self):
         cmd, payload = self.queue.get()
         if cmd == 'connect':
-            self.network.connect_to_node(payload['addr'])
-        if cmd == 'start_paxos':
-            self.paxos.start_paxos_round(payload['value'])
+            self.network.connect_to_node(payload['addr'], 'paxos_join_request')
+        elif cmd == 'start_paxos':
+            if self.paxos is not None:
+                self.paxos.start_paxos_round(payload['value'])
         else:
             print('Unknown command:', cmd)
 
@@ -56,23 +60,46 @@ class Peer(Thread):
         print('[IN]:\t%s' % msg)
 
         cmd = msg['do']
-        if cmd == 'connect_to':
-            hosts = [tuple(h) for h in msg['hosts']]
-            for addr in filter(lambda a: a not in self.network.connections, hosts):
-                self.connect_to_peer(*addr)
+        #if cmd == 'connect_to':
+        #    hosts = [tuple(h) for h in msg['hosts']]
+        #    for addr in filter(lambda a: a not in self.network.connections, hosts):
+        #        self.connect_to_peer(*addr)
+        if cmd == 'paxos_join':
+            self.paxos = PaxosNode(self, self.network, random.getrandbits(128), msg['group_size'])
+            self.index.fromJSON(msg['index'])
+            peers = [tuple(p) for p in msg['peers']]
+            for addr in peers:
+                #self.connect_to_peer(*addr)
+                self.network.connect_to_node(addr)
+
+        elif self.paxos is None:  # do not handle other Messages if not yet part of Paxos
+            if self.network.connections:
+                self.network.send(sock.getpeername(), Message({
+                    'do': 'try_other_peer',
+                    'addr': random.choice(list(self.network.connections.values())).remote_listen_addr,
+                }))
+
         elif cmd == 'hello':
-            # know listening host/port now -> connection is considered open
-            self.network.synchronize_peer(sock.getpeername(), msg['listen_addr'])
+            #self.network.synchronize_peer(sock.getpeername(), listen_addr)
+            conn = self.network.connections[sock.getpeername()]
+            conn.remote_listen_addr = tuple(msg['listen_addr'])
+        elif cmd == 'client_hello':
+            conn = self.network.connections[sock.getpeername()]
+            conn.remote_listen_addr = tuple(msg['http_addr'])
+
+        elif cmd == 'paxos_join_request':
+            conn = self.network.connections[sock.getpeername()]
+            conn.remote_listen_addr = tuple(msg['listen_addr'])
             if self.paxos.group_size == 1:
+                self.paxos.group_size += 1
                 self.send_paxos_join_confirmation(sock.getpeername())
             else:
                 self.run_paxos({
                     'change': 'join',
-                    'entry': sock.getpeername(),
+                    'respond_addr': sock.getpeername(),
+                    'listen_addr': tuple(msg['listen_addr']),
                 })
-        elif cmd == 'paxos_join':
-            self.paxos.group_size = msg['group_size']
-            self.index.fromJSON(msg['index'])
+
         elif cmd == 'paxos_prepare':
             self.paxos.handle_prepare(sock.getpeername(), tuple(msg['id']))
         elif cmd == 'paxos_promise':
@@ -82,14 +109,9 @@ class Peer(Thread):
         elif cmd == 'paxos_accept':
             self.paxos.handle_accept(tuple(msg['id']))
         elif cmd == 'paxos_learn':
-            v = msg['value']
-            if v['change'] == 'join':
-                self.send_paxos_join_confirmation(v['entry'])
-            elif v['change'] == 'add':
-                self.index.add_entry(v['entry'], v['addr'])
-            elif v['change'] == 'remove':
-                self.index.remove_entry(v['entry'])
+            self.apply_chosen_value(msg['value'])  # TODO: change broadcast to include localhost
             self.paxos.handle_learn(tuple(msg['id']), msg['value'])
+
         elif cmd == 'index_search':
             self.network.send(sock.getpeername(), {
                 'do': 'index_search_result',
@@ -113,9 +135,9 @@ class Peer(Thread):
         if self.network:
             self.network.stop()
 
-    def connect_to_peer(self, ip, port):
+    def connect_to_paxos(self, addr):
         self.queue.put(('connect', {
-            'addr': (ip, int(port)),
+            'addr': addr,
         }))
 
     def run_paxos(self, value):
@@ -128,12 +150,23 @@ class Peer(Thread):
         while not self.network.is_done():
             pass
 
+    def apply_chosen_value(self, value, selfStartedRound=False):
+        if value['change'] == 'join':
+            self.paxos.group_size += 1
+            if selfStartedRound:
+                self.send_paxos_join_confirmation(tuple(value['respond_addr']))
+        elif value['change'] == 'add':
+            self.index.add_entry(value['entry'], value['addr'])
+        elif value['change'] == 'remove':
+            self.index.remove_entry(value['entry'])
+
     def send_paxos_join_confirmation(self, addr):
-        self.paxos.group_size += 1
+        neighbors = filter(lambda c: c != self and c.is_synchronized(), self.network.connections.values())
         self.network.send(addr, {
             'do': 'paxos_join',
             'group_size': self.paxos.group_size,
             'index': self.index.toJSON(),
+            'peers': [c.remote_listen_addr for c in neighbors]
         })
 
 
@@ -142,7 +175,7 @@ if __name__ == '__main__':
         sys.exit('Usage: python peer.py (server|ip port)')
 
     log.basicConfig(level=log.DEBUG, filename='debug.log')
-    peer = Peer()
+    peer = Peer(sys.argv[1] == 'server')
     peer.start()
     if sys.argv[1] != 'server':
-        peer.connect_to_peer(sys.argv[1], sys.argv[2])
+        peer.connect_to_paxos((sys.argv[1], int(sys.argv[2])))

@@ -203,7 +203,7 @@ def download(path, filename, addr):
             i += 1
         filename = "%s_%s" % (filename, i)
         print("Saving file as %s." % filename)
-    
+
     try:  # open url, write response to file
         with urllib.request.urlopen(url) as response, open(path / filename, 'wb') as out_file:
             shutil.copyfileobj(response, out_file)

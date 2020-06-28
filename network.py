@@ -15,7 +15,7 @@ from message import Message
 # - establishing connections to peers
 class NetworkNode:
 
-    DEFAULT_PORT = 63001
+    DEFAULT_PORT = 63000
     RECV_BUFFER = 2048
 
     def __init__(self, selector):
@@ -62,7 +62,7 @@ class NetworkNode:
         if mask & selectors.EVENT_WRITE:
             conn.flush_out_buffer()
 
-    def synchronize_peer(self, peer_addr, peer_listen_addr):
+    def _synchronize_peer(self, peer_addr, peer_listen_addr):
         conn = self.connections[peer_addr]
         conn.remote_listen_addr = peer_listen_addr
         # ignore self and non-open connections -> connections to those will be made when they are opened themselves
@@ -84,7 +84,7 @@ class NetworkNode:
         self.selector = None
         self.done = True
 
-    def connect_to_node(self, addr):
+    def connect_to_node(self, addr, first_message='hello'):
         print('Trying to connect:', addr)
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -95,7 +95,7 @@ class NetworkNode:
             conn = Connection(sock, known=True)
             self.connections[addr] = conn
             conn.send(Message({
-                'do': 'hello',
+                'do': first_message,
                 'listen_addr': self.listen_addr,
             }))
         except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as e:
@@ -112,8 +112,8 @@ class NetworkNode:
     def broadcast(self, payload):
         print('NUMBER OF CONNECTIONS: ', len(self.connections))
         for conn in self.connections.values():
-            if conn.is_synchronized():
-                conn.send(Message(payload))
+            #if conn.is_synchronized():
+            conn.send(Message(payload))
 
     def register_forwarding(self, host, port):
         # addportmapping(external-port, protocol, internal-host, internal-port, description, remote-host)

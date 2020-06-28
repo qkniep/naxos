@@ -1,7 +1,8 @@
 class PaxosNode:
 
-    def __init__(self, network_node, node_id, num_peers):
+    def __init__(self, peer, network_node, node_id, num_peers):
         print('This peer is now operating Paxos node %i in a group of size %i' % (node_id, num_peers))
+        self.peer = peer  # TODO: remove this
         self.network_node = network_node
         self.group_size = num_peers
         self.current_id = (0, node_id)
@@ -62,6 +63,7 @@ class PaxosNode:
             return
         self.acceptances += 1
         if self.acceptances == self.majority():
+            self.peer.apply_chosen_value(self.accepted_value, selfStartedRound=True)
             self.network_node.broadcast({
                 'do': 'paxos_learn',
                 'id': proposal_id,
