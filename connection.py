@@ -12,16 +12,8 @@ class Connection:
         self.in_buf = b''
         self.out_buf = b''
 
-        # need peer's listening address, before that we don't consider the connection complete
-        if not known:
-            self._is_synchronized = False
-            self.remote_listen_addr = None
-        else:
-            self._is_synchronized = True
+        if known:
             self.remote_listen_addr = sock.getpeername()
-
-    def synchronize_peer(self):
-        pass
 
     def handle_data(self, data):
         splitted = data.split(util.DELIMITER)  # it could happen that we receive multiple messages in one chunk
@@ -45,6 +37,3 @@ class Connection:
             sent = self.sock.send(self.out_buf)
             log.debug('echo %s from buffer to socket %s' % (repr(self.out_buf[:sent]), self.sock.getsockname()))
             self.out_buf = self.out_buf[sent:]
-
-    def is_synchronized(self):
-        return self._is_synchronized

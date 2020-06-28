@@ -62,17 +62,6 @@ class NetworkNode:
         if mask & selectors.EVENT_WRITE:
             conn.flush_out_buffer()
 
-    def _synchronize_peer(self, peer_addr, peer_listen_addr):
-        conn = self.connections[peer_addr]
-        conn.remote_listen_addr = peer_listen_addr
-        # ignore self and non-open connections -> connections to those will be made when they are opened themselves
-        neighbors = filter(lambda c: c != self and c.is_synchronized(), self.connections.values())
-        conn.send(Message({
-            'do': 'connect_to',
-            'hosts': [c.remote_listen_addr for c in neighbors]
-        }))
-        conn._is_synchronized = True
-
     def reset(self):
         self.selector.close()
         self.listen_sock.close()
@@ -112,7 +101,6 @@ class NetworkNode:
     def broadcast(self, payload):
         print('NUMBER OF CONNECTIONS: ', len(self.connections))
         for conn in self.connections.values():
-            #if conn.is_synchronized():
             conn.send(Message(payload))
 
     def register_forwarding(self, host, port):
@@ -126,14 +114,18 @@ class NetworkNode:
     def is_done(self):
         return self.done
 
+    def set_remote_listen_addr(self, sock, listen_addr):
+        conn = self.connections[sock.getpeername()]
+        conn.remote_listen_addr = listen_addr
+
     def get_remote_listen_addr(self, sock):
         return self.connections[sock.getpeername()].remote_listen_addr
 
     def get_socket(self, addr):
         return self.connections[addr].sock
 
-    def get_random_addr(self):
-        return random.choice(list(self.connections.keys()))
+    def get_random_listen_addr(self):
+        return random.choice(list(self.connections.values())).remote_listen_addr,
 
 
 def create_listening_socket(host, port=0):

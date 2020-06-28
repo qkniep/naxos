@@ -13,6 +13,7 @@ import util
 
 
 class Peer(Thread):
+
     SELECT_TIMEOUT = 1
     VERSION = '0.2.0'
 
@@ -60,36 +61,27 @@ class Peer(Thread):
         print('[IN]:\t%s' % msg)
 
         cmd = msg['do']
-        #if cmd == 'connect_to':
-        #    hosts = [tuple(h) for h in msg['hosts']]
-        #    for addr in filter(lambda a: a not in self.network.connections, hosts):
-        #        self.connect_to_peer(*addr)
-        if cmd == 'paxos_join':
+        if cmd == 'paxos_join_confirm':
             self.paxos = PaxosNode(self, self.network, random.getrandbits(128), msg['group_size'])
             self.index.fromJSON(msg['index'])
             peers = [tuple(p) for p in msg['peers']]
             for addr in peers:
-                #self.connect_to_peer(*addr)
                 self.network.connect_to_node(addr)
 
         elif self.paxos is None:  # do not handle other Messages if not yet part of Paxos
             if self.network.connections:
                 self.network.send(sock.getpeername(), Message({
                     'do': 'try_other_peer',
-                    'addr': random.choice(list(self.network.connections.values())).remote_listen_addr,
+                    'addr': self.network.get_random_listen_addr(),
                 }))
 
         elif cmd == 'hello':
-            #self.network.synchronize_peer(sock.getpeername(), listen_addr)
-            conn = self.network.connections[sock.getpeername()]
-            conn.remote_listen_addr = tuple(msg['listen_addr'])
+            self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
         elif cmd == 'client_hello':
-            conn = self.network.connections[sock.getpeername()]
-            conn.remote_listen_addr = tuple(msg['http_addr'])
+            self.network.set_remote_listen_addr(sock, tuple(msg['http_addr']))
 
         elif cmd == 'paxos_join_request':
-            conn = self.network.connections[sock.getpeername()]
-            conn.remote_listen_addr = tuple(msg['listen_addr'])
+            self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
             if self.paxos.group_size == 1:
                 self.paxos.group_size += 1
                 self.send_paxos_join_confirmation(sock.getpeername())
@@ -161,12 +153,13 @@ class Peer(Thread):
             self.index.remove_entry(value['entry'])
 
     def send_paxos_join_confirmation(self, addr):
-        neighbors = filter(lambda c: c != self and c.is_synchronized(), self.network.connections.values())
+        peers = list(filter(lambda c: c.sock.getpeername() != addr, self.network.connections.values()))
+        peers = [c.remote_listen_addr for c in peers]
         self.network.send(addr, {
-            'do': 'paxos_join',
+            'do': 'paxos_join_confirm',
             'group_size': self.paxos.group_size,
             'index': self.index.toJSON(),
-            'peers': [c.remote_listen_addr for c in neighbors]
+            'peers': peers
         })
 
 
