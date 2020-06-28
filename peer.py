@@ -1,7 +1,6 @@
 import logging as log
 import selectors
 import sys
-import socket
 from threading import Thread
 
 from index import Index
@@ -12,12 +11,16 @@ import util
 
 
 class Peer(Thread):
+    """Overlay network peer maintaining a network node, paxos instances, and an index.
+    Serve as an index server to the clients.
+    Coordinate with peers through paxos to maintain a consistent index.
+    """
 
     SELECT_TIMEOUT = 1
     VERSION = '0.2.0'
 
     def __init__(self, first=False):
-        super().__init__()
+        super().__init__()  # Thread constructor
 
         self.queue = util.PollableQueue()
         self.selector = selectors.DefaultSelector()
@@ -28,7 +31,7 @@ class Peer(Thread):
         self.index = Index()
         self.running = True
 
-    def run(self):
+    def run(self):  # called by Thread.start()
         print('Running Naxos v' + self.VERSION)
         while self.running:
             events = self.selector.select(timeout=self.SELECT_TIMEOUT)
@@ -51,9 +54,12 @@ class Peer(Thread):
             if self.paxos is not None:
                 self.paxos.start_paxos_round(payload['value'])
         else:
-            print('Unknown command:', cmd)
+            raise ValueError('Unknown command:', cmd)
 
     def handle_message(self, sock, msg):
+        """Handle the Message msg, which arrived at the socket sock.
+        The message might have been sent by another paxos peer or a client.
+        """
         print('[IN]:\t%s' % msg)
 
         cmd = msg['do']
@@ -160,11 +166,12 @@ class Peer(Thread):
 
 
 if __name__ == '__main__':
-    if not len(sys.argv) in range(2,4):
-        sys.exit('Usage: python peer.py (server|ip port)')
+    argc = len(sys.argv)
+    if not (argc == 1 or argc == 3):
+        sys.exit('Usage: python peer.py (ip port)')
 
     log.basicConfig(level=log.DEBUG, filename='debug.log')
-    peer = Peer(sys.argv[1] == 'server')
+    peer = Peer(argc == 1)
     peer.start()
-    if sys.argv[1] != 'server':
+    if argc == 3:
         peer.connect_to_paxos((sys.argv[1], int(sys.argv[2])))

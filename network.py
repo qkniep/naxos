@@ -11,22 +11,25 @@ from connection import Connection
 from message import Message
 
 
-# Wrapper for socket API and uPnP:
-# - listening for incoming connectionst
-# - establishing connections to peers
 class NetworkNode:
+    """Wrapper for socket API and uPnP.
+    Listen for incoming connections, establish connections to other network nodes.
+    """
 
     DEFAULT_PORT = 63000
     RECV_BUFFER = 2048
 
     def __init__(self, selector):
+        """Create new network node with uPnP forwarding and a listening socket.
+        All opened sockets are registered with selector (select wrapper).
+        """
         # upnp port forwarding config
         self.upnp = miniupnpc.UPnP()
         self.upnp.discoverdelay = 10
         self.upnp.discover()
         self.upnp.selectigd()
 
-        host = self.upnp.lanaddr  # TODO: register port forwarding on local address but give peers global address
+        host = self.upnp.lanaddr
         self.listen_sock, port = create_listening_socket(host, self.DEFAULT_PORT)
         self.listen_addr = (self.upnp.externalipaddress(), port)
 
@@ -39,6 +42,9 @@ class NetworkNode:
         self.done = False
 
     def accept_incoming_connection(self):
+        """Accept an incoming connection on the listeing socket,
+        register it with the selector and add it to the connections map.
+        """
         sock, addr = self.listen_sock.accept()
         log.debug('accepted connection from %s' % str(addr))
         sock.setblocking(False)
@@ -47,6 +53,10 @@ class NetworkNode:
         self.connections[addr] = Connection(sock)
 
     def service_connection(self, sock, mask):
+        """Handle a single connection represented by the socket sock.
+        Close the connection if it failed or our peer terminated it.
+        Yield messages arriving on the socket.
+        """
         addr = sock.getpeername()
         conn = self.connections[addr]
         if mask & selectors.EVENT_READ:
@@ -54,7 +64,7 @@ class NetworkNode:
                 recv_data = sock.recv(self.RECV_BUFFER)
                 if recv_data:
                     yield from conn.handle_data(recv_data)
-                else:  # connection closed
+                else:  # connection closed by peer
                     log.debug('closing connection to %s' % str(addr))
                     self.close_connection(addr)
             except (ConnectionResetError, ConnectionAbortedError):
@@ -64,6 +74,7 @@ class NetworkNode:
             conn.flush_out_buffer()
 
     def reset(self):
+        """Reset everything to the state after the node was created."""
         self.selector.close()
         self.listen_sock.close()
         for conn in self.connections.values():
@@ -75,6 +86,10 @@ class NetworkNode:
         self.done = True
 
     def connect_to_node(self, addr, first_message='hello'):
+        """Try to connect to another network node under the address addr.
+        Send a Message of type first_message after successfully connecting.
+        This first message also contains this node's listening address.
+        """
         print('Trying to connect:', addr)
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -92,6 +107,7 @@ class NetworkNode:
             print('Could not establish connection to (%s, %s):' % addr, e)
 
     def close_connection(self, addr):
+        """Close a connection to another network node."""
         self.selector.unregister(self.get_socket(addr))
         self.get_socket(addr).close()
         del self.connections[addr]
@@ -135,17 +151,19 @@ class NetworkNode:
 
 
 def create_listening_socket(host, port=0):
+    """Create a new listening socket on this node.
+    Select a free port if port is not explicitly set or already taken.
+    """
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind((host, port))
         sock.listen()
         sock.setblocking(False)
         _port = sock.getsockname()[1]
-        print('Start listening:', (host, _port))
+        print('This peer is listening for incoming connections on:', (host, _port))
         log.debug('listening on (%s, %s)' % (host, _port))
 
         return sock, _port
     except Exception as e:
-        print('Could not open listening socket:', e)
-        if port != 0:  # try again with any port, but only once.
-            return create_listening_socket(host)
+        log.debug('could not open listening socket: %s' % e)
+        return create_listening_socket(host)

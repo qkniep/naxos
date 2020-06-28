@@ -5,9 +5,12 @@ import util
 
 
 class Connection:
+    """Wrapper around socket.
+    Represents a single connection between two network nodes.
+    """
 
-    def __init__(self, sock, known = False):
-        print('Connection created: ', sock.getsockname())
+    def __init__(self, sock, known=False):
+        print('Connection created:', sock.getsockname())
         self.sock = sock
         self.in_buf = b''
         self.out_buf = b''
@@ -16,7 +19,10 @@ class Connection:
             self.remote_listen_addr = sock.getpeername()
 
     def handle_data(self, data):
-        splitted = data.split(util.DELIMITER)  # it could happen that we receive multiple messages in one chunk
+        """Append new incoming bytes data to the buffer in_buf.
+        Split by the message delimiter and yield parsed Message objects.
+        """
+        splitted = data.split(util.DELIMITER)  # it could happen that we receive multiple messages in one packet
         for i, msg_chunk in enumerate(splitted):
             self.in_buf += msg_chunk
             if i == len(splitted)-1:  # last one is either incomplete or empty string, so no parsing in this case
@@ -24,6 +30,7 @@ class Connection:
             yield from self.parse_in_buffer()
 
     def parse_in_buffer(self):
+        """Decode raw transmitted bytes returning a Message object."""
         message = util.decode_data(self.in_buf)
         yield Message.deserialize(message)
         self.in_buf = b''
@@ -33,6 +40,7 @@ class Connection:
         self.out_buf += util.encode_data(msg.serialize()) + util.DELIMITER
 
     def flush_out_buffer(self):
+        """Write everything currently in out_buf to the socket."""
         if self.out_buf:
             sent = self.sock.send(self.out_buf)
             log.debug('echo %s from buffer to socket %s' % (repr(self.out_buf[:sent]), self.sock.getsockname()))

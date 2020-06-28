@@ -30,12 +30,12 @@ RECV_BUFFER = 1024
 class InputThread(Thread):
 
     def __init__(self, queue):
-        super().__init__()
+        super().__init__()  # Thread constructor
 
         self.queue = queue
         self.running = True
 
-    def run(self):
+    def run(self):  # called by Thread.start()
         while self.running:
             try:
                 line = input('> ')
@@ -236,17 +236,16 @@ def handle_response(message):
 
 
 def determine_http_addr(upnp):
-        host = upnp.lanaddr
-        while True:
-            port = random.randint(1024, 65535)  # random port
-            try:
-                upnp.addportmapping(port, 'TCP', host, port, 'Naxos HTTP Server', '')
-                break  # no exception, so mapping worked
-            except:
-                pass
-        remove_mapping = lambda: upnp.deleteportmapping(port, 'TCP', 'Naxos')
-        return (host, port), remove_mapping
-
+    host = upnp.lanaddr
+    while True:
+        port = random.randint(1024, 65535)  # random port
+        try:
+            upnp.addportmapping(port, 'TCP', host, port, 'Naxos HTTP Server', '')
+            break  # no exception, so mapping worked
+        except:
+            pass
+    remove_mapping = lambda: upnp.deleteportmapping(port, 'TCP', 'Naxos')
+    return (host, port), remove_mapping
 
 
 def get_httpd(path):
