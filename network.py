@@ -38,6 +38,7 @@ class NetworkNode:
         self.listen_addr = (self.upnp.externalipaddress(), port)
 
         self.register_forwarding(host, port)
+        self.port = port
 
         self.selector = selector
         self.selector.register(self.listen_sock, selectors.EVENT_READ)

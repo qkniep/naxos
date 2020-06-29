@@ -4,6 +4,7 @@
 import logging as log
 import selectors
 import sys
+import time
 from threading import Thread
 
 from index import Index
@@ -38,18 +39,21 @@ class Peer(Thread):
     def run(self):  # called by Thread.start()
         """Main loop: Handles incoming messages and commands sent from main thread."""
         print('Running Naxos v' + self.VERSION)
-        while self.running:
-            events = self.selector.select(timeout=self.SELECT_TIMEOUT)
-            for key, mask in events:
-                if key.fileobj is self.queue:
-                    self.handle_queue()
-                elif key.fileobj is self.network.listen_sock:
-                    self.network.accept_incoming_connection()
-                else:
-                    for msg in self.network.service_connection(key.fileobj, mask):
-                        self.handle_message(key.fileobj, msg)
-        print('Shutting down this peer...')
-        self.network.reset()
+        try:
+            while self.running:
+                events = self.selector.select(timeout=self.SELECT_TIMEOUT)
+                for key, mask in events:
+                    if key.fileobj is self.queue:
+                        self.handle_queue()
+                    elif key.fileobj is self.network.listen_sock:
+                        self.network.accept_incoming_connection()
+                    else:
+                        for msg in self.network.service_connection(key.fileobj, mask):
+                            self.handle_message(key.fileobj, msg)
+        finally:
+            print('Shutting down this peer...')
+            self.network.reset()
+
 
     def handle_queue(self):
         """"""
@@ -135,6 +139,7 @@ class Peer(Thread):
             })
 
     def _stop(self):
+        self.running = False
         pass
         #if self.network:
         #    self.network.stop()
@@ -186,3 +191,8 @@ if __name__ == '__main__':
     peer.start()
     if NUM_ARGS == 3:
         peer.connect_to_paxos((sys.argv[1], int(sys.argv[2])))
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        peer._stop()
