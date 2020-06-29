@@ -26,8 +26,8 @@ from connection import Connection
 from message import Message
 
 
-SELECT_TIMEOUT = 2
-RECV_BUFFER = 1024
+# SELECT_TIMEOUT = 2
+# RECV_BUFFER = 1024
 
 class InputThread(threading.Thread):
     """Thread for handling the user input (stdin)."""
@@ -120,6 +120,114 @@ class DirectoryObserver(threading.Thread):
         self.running = False  # TODO: is this thread safe? (we read this variable in run)
 
 
+class Client:
+    SELECT_TIMEOUT = 2
+    RECV_BUFFER = 1024
+
+    def __init__(self, argv, queue, address, naxos_path, http_addr):
+        self.address = address
+        self.naxos_path = naxos_path
+        self.http_addr = http_addr
+
+        self.selector = selectors.DefaultSelector()
+        self.queue = queue
+        self.selector.register(queue, selectors.EVENT_READ)
+
+        self.results = {}
+
+        try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.connect(self.address)
+            self.selector.register(self.sock, selectors.EVENT_READ | selectors.EVENT_WRITE)
+        except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as exception:
+            print('Could not establish connection to (%s, %s):' % self.address, exception)
+            raise Exception()
+        self.conn = Connection(self.sock, known=True)
+        self.conn.send(Message({
+            'do': 'client_hello',
+            'http_addr': self.http_addr
+        }))
+
+
+    def handle_connections(self):
+        events = self.selector.select(timeout=self.SELECT_TIMEOUT)
+        for key, mask in events:
+            if key.fileobj is self.queue:
+                self.handle_queue()
+            elif key.fileobj is self.sock:
+                if mask & selectors.EVENT_READ:
+                    try:
+                        recv_data = self.sock.recv(self.RECV_BUFFER)
+                        if recv_data:
+                            for message in self.conn.handle_data(recv_data):
+                                log.debug(message)
+                                self.handle_response(message)
+                        else:  # connection closed
+                            self.reset()
+                    except (ConnectionResetError, ConnectionAbortedError):
+                        print('Connection reset/aborted:', address)
+                        self.reset()
+                if mask & selectors.EVENT_WRITE:
+                    self.conn.flush_out_buffer()
+
+    def handle_queue(self):
+        cmd, payload = self.queue.get()
+        if cmd == 'quit':
+            self.reset()
+
+        elif cmd == 'insert':
+            for file in payload['files']:
+                self.conn.send(Message({
+                    'do': 'index_add',
+                    'filename': file
+                }))
+
+        elif cmd == 'delete':
+            for file in payload['files']:
+                self.conn.send(Message({
+                    'do': 'index_remove',
+                    'filename': file
+                }))
+
+        elif cmd == 'search':
+            for file in payload['files']:
+                self.conn.send(Message({
+                    'do': 'index_search',
+                    'filename': file
+                }))
+
+        elif cmd == 'download':
+            for f in payload['files']:
+                addr = self.results.get(f)
+                if addr is not None:
+                    print('Using cached address (%s:%s) for %s' % (*addr, f))
+                    download(self.naxos_path, f, addr)
+                else:
+                    print('You have to search for the file first.')  # TODO: Auto-search
+        else:
+            raise ValueError('Unexpected command.')
+    
+    
+    def handle_response(self, msg):
+        cmd = msg['do']
+
+        if cmd == 'index_search_result':
+            addr = msg['addr']
+            query = msg['query']
+            if addr is not None:
+                print('Found results for query: %s' % query)
+                self.results[query] = addr
+            else:
+                print('No results found for query: %s' % msg['query'])
+        else:
+            print(msg)
+
+
+    def reset(self):
+        self.selector.unregister(self.sock)
+        self.sock.close()
+        sys.exit(0)
+
 def parse_config(argv):
     config_path = Path.cwd() / 'naxos.ini'
     host = None
@@ -160,47 +268,6 @@ def parse_config(argv):
     return addr, naxos_path
 
 
-def handle_queue(queue, naxos_path, sock, conn):
-    cmd, payload = queue.get()
-    if cmd == 'quit':
-        dir_observer.stop()
-        input_thread.stop()
-        sock.close()
-        sys.exit(0)
-
-    elif cmd == 'insert':
-        for file in payload['files']:
-            conn.send(Message({
-                'do': 'index_add',
-                'filename': file
-            }))
-
-    elif cmd == 'delete':
-        for file in payload['files']:
-            conn.send(Message({
-                'do': 'index_remove',
-                'filename': file
-            }))
-
-    elif cmd == 'search':
-        for file in payload['files']:
-            conn.send(Message({
-                'do': 'index_search',
-                'filename': file
-            }))
-
-    elif cmd == 'download':
-        for f in payload['files']:
-            addr = RESULTS.get(f)
-            if addr is not None:
-                print('Using cached address (%s:%s) for %s' % (*addr, f))
-                download(naxos_path, f, addr)
-            else:
-                print('You have to search for the file first.')  # TODO: Auto-search
-    else:
-        raise ValueError('Unexpected command.')
-
-
 def download(path, filename, addr):
     host, port = addr
     url = 'http://%s:%s/%s' % (host, port, filename)
@@ -219,32 +286,6 @@ def download(path, filename, addr):
         print('Error while downloading file %s: %s' % (filename, error))
 
 
-def handle_data(data):  # XXX DRY
-    global BUFFER
-    splitted = data.split(util.DELIMITER)  # works with multiple messages in one chunk
-    for i, msg_chunk in enumerate(splitted):
-        BUFFER += msg_chunk
-        if i == len(splitted)-1:
-            break  # last one is either incomplete or empty string, so no parsing in this case
-        yield Message.deserialize(util.decode_data(BUFFER))
-        BUFFER = b''
-
-
-def handle_response(msg):
-    cmd = msg['do']
-
-    if cmd == 'index_search_result':
-        addr = msg['addr']
-        query = msg['query']
-        if addr is not None:
-            print('Found results for query: %s' % query)
-            RESULTS[query] = addr
-        else:
-            print('No results found for query: %s' % msg['query'])
-    else:
-        print(msg)
-
-
 def get_httpd(path):
     Handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=path)
 
@@ -253,12 +294,6 @@ def get_httpd(path):
     upnp.discover()
     upnp.selectigd()
 
-    (host, port), remove_mapping = determine_http_addr(upnp)
-
-    return socketserver.TCPServer((host, port), Handler), remove_mapping, (host, port)
-
-
-def determine_http_addr(upnp):
     host = upnp.lanaddr
     while True:
         port = random.randint(1024, 65535)  # random port
@@ -268,21 +303,14 @@ def determine_http_addr(upnp):
         except:
             pass
     remove_mapping = lambda: upnp.deleteportmapping(port, 'TCP', 'Naxos')
-    return (host, port), remove_mapping
 
-
-RESULTS = {}
-BUFFER = b''
+    return socketserver.TCPServer((host, port), Handler), remove_mapping, (host, port)
 
 if __name__ == '__main__':
     log.basicConfig(level=log.DEBUG, filename='client_debug.log')
 
     address, naxos_path = parse_config(sys.argv)
-
-    selector = selectors.DefaultSelector()
-
     queue = util.PollableQueue()
-    selector.register(queue, selectors.EVENT_READ)
 
     input_thread = InputThread(queue)
     input_thread.start()
@@ -294,43 +322,9 @@ if __name__ == '__main__':
     httpd.start()
 
     try:
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect(address)
-            selector.register(sock, selectors.EVENT_READ | selectors.EVENT_WRITE)
-        except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as exception:
-            print('Could not establish connection to (%s, %s):' % address, exception)
-            raise Exception()
-        conn = Connection(sock, known=True)
-        conn.send(Message({
-            'do': 'client_hello',
-            'http_addr': http_addr
-        }))
-
+        client = Client(sys.argv, queue, address, naxos_path, http_addr)
         while True:
-            events = selector.select(timeout=SELECT_TIMEOUT)
-            for key, mask in events:
-                if key.fileobj is queue:
-                    handle_queue(queue, naxos_path, sock, conn)
-                elif key.fileobj is sock:
-                    if mask & selectors.EVENT_READ:
-                        try:
-                            recv_data = sock.recv(RECV_BUFFER)
-                            if recv_data:
-                                for message in handle_data(recv_data):
-                                    log.debug(message)
-                                    handle_response(message)
-                            else:  # connection closed
-                                selector.unregister(sock)
-                                sock.close()
-                                sys.exit(0)
-                        except (ConnectionResetError, ConnectionAbortedError):
-                            print('Connection reset/aborted:', address)
-                            selector.unregister(sock)
-                            sock.close()
-                            sys.exit(0)
-                    if mask & selectors.EVENT_WRITE:
-                        conn.flush_out_buffer()
+            client.handle_connections()
     finally:
         dir_observer.stop()
         input_thread.stop()
