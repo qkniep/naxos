@@ -6,7 +6,6 @@ import random
 import selectors
 import socket
 import struct
-import types
 
 import miniupnpc
 
@@ -107,8 +106,8 @@ class NetworkNode:
                 'do': first_message,
                 'listen_addr': self.listen_addr,
             }))
-        except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as e:
-            print('Could not establish connection to (%s, %s):' % addr, e)
+        except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as error:
+            print('Could not establish connection to %s: %s' % (addr, error))
 
     def close_connection(self, addr):
         """Close a connection to another network node."""
@@ -117,6 +116,7 @@ class NetworkNode:
         del self.connections[addr]
 
     def send(self, addr, payload):
+        """Send a message containing payload to the connection with addr."""
         self.connections[addr].send(Message(payload))
 
     def broadcast(self, payload):
@@ -146,12 +146,13 @@ class NetworkNode:
         return self.connections[addr].sock
 
     def get_random_listen_addr(self):
+        """Pick a network node from this node's connections and return their listen address."""
         return random.choice(list(self.connections.values())).remote_listen_addr
 
     def unique_id_from_own_addr(self):
-        ip_addr, port = self.listen_sock.getsockname()
-        ip_num = struct.unpack("!I", socket.inet_aton(ip_addr))[0]
-        return ip_num * 65536 + port
+        host, port = self.listen_sock.getsockname()
+        ip_int = struct.unpack("!I", socket.inet_aton(host))[0]
+        return ip_int * 65536 + port
 
 
 def create_listening_socket(host, port=0):

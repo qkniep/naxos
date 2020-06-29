@@ -1,3 +1,4 @@
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 """Overlay P2P network of peers running paxos to maintain a consistent index."""
 
@@ -135,8 +136,8 @@ class Peer(Thread):
 
     def _stop(self):
         pass
-        #if self.network:
-        #    self.network.stop()
+        # if self.network:
+        #     self.network.stop()
 
     def connect_to_paxos(self, addr):
         """Adds a 'connect' command to the command queue."""

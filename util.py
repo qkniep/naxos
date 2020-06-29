@@ -6,12 +6,13 @@ import os
 import queue
 import socket
 
-
 DELIMITER = b'|'
+
 
 def encode_data(data):
     """Base64-encode data returning the base64 string."""
     return base64.b64encode(data.encode('utf-8'))
+
 
 def decode_data(data):
     """Base64-decode data returning the original string."""

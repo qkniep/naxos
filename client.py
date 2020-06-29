@@ -1,3 +1,4 @@
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 """Naxos client CLI."""
 
@@ -15,7 +16,7 @@ import socketserver
 import sys
 import threading
 import time
-import urllib.request
+import urllib
 
 from pathlib import Path
 
@@ -25,9 +26,9 @@ import util
 from connection import Connection
 from message import Message
 
-
 SELECT_TIMEOUT = 2
 RECV_BUFFER = 1024
+
 
 class InputThread(threading.Thread):
     """Thread for handling the user input (stdin)."""
@@ -90,7 +91,6 @@ class DirectoryObserver(threading.Thread):
         self.running = True
 
     def run(self):
-        scan = lambda p: set([f.name for f in p.glob('*') if f.is_file()])  # list (non-recursive) all files in directory
         files = scan(self.path)
         old = files
         self.queue.put(('insert', {
@@ -120,6 +120,11 @@ class DirectoryObserver(threading.Thread):
         self.running = False  # TODO: is this thread safe? (we read this variable in run)
 
 
+def scan(path):
+    """Lists (non-recursively) all files in directory."""
+    return {f.name for f in path.glob('*') if f.is_file()}
+
+
 def parse_config(argv):
     config_path = Path.cwd() / 'naxos.ini'
     host = None
@@ -133,21 +138,23 @@ def parse_config(argv):
             host = config['naxos']['host_ip']
             port = config['naxos']['host_port']
             naxos_path = Path(config['naxos']['naxos_directory'])
-        except:
-            sys.exit('Malformatted ini file.')
+        except KeyError:
+            sys.exit('Malformatted naxos.ini file.')
     else:  # try to read the necessary parameters from args
         try:
             host, port = argv[1].split(':')
             naxos_path = Path(argv[2])
-        except:
-            print('Usage: python client.py <naxos peer host>:<naxos peer port> <"path to naxos directory">')
+        except (IndexError, ValueError):
+            print('Usage: python client.py\
+                  <naxos peer host>:<naxos peer port>\
+                  <"path to naxos directory">')
             print('Alternative: python client.py with a naxos.ini file in the same directory')
             sys.exit(0)
 
-    # sanity check
+    # sanity checks
     pattern = r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$'  # ipv4
     if not re.match(pattern, host):
-        sys.exit('host ip is not a well formed ip address.')
+        sys.exit('host ip is not a well formed IPv4 address.')
     if not naxos_path.is_dir():
         sys.exit('provided naxos directory is not a directory.')
     if not port.isdigit():
@@ -204,6 +211,11 @@ def handle_queue(queue, naxos_path, sock, conn):
 
 
 def download(path, filename, addr):
+    """Download a file from a peer via HTTP and save it to disk.
+
+    An HTTP GET is sent to: http://addr/filename.
+    The result is downloaded into: path/filename.
+    """
     host, port = addr
     url = 'http://%s:%s/%s' % (host, port, filename)
 
@@ -217,7 +229,7 @@ def download(path, filename, addr):
     try:  # open url, write response to file
         with urllib.request.urlopen(url) as response, open(path / filename, 'wb') as out_file:
             shutil.copyfileobj(response, out_file)
-    except Exception as error:
+    except (IOError, urllib.error.URLError, shutil.Error) as error:
         print('Error while downloading file %s: %s' % (filename, error))
 
 
@@ -246,7 +258,7 @@ def handle_response(msg):
 
 
 def get_httpd(path):
-    Handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=path)
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=path)
 
     upnp = miniupnpc.UPnP()
     upnp.discoverdelay = 10
@@ -255,7 +267,7 @@ def get_httpd(path):
 
     (host, port), remove_mapping = determine_http_addr(upnp)
 
-    return socketserver.TCPServer((host, port), Handler), remove_mapping, (host, port)
+    return socketserver.TCPServer((host, port), handler), remove_mapping, (host, port)
 
 
 def determine_http_addr(upnp):
@@ -279,19 +291,18 @@ if __name__ == '__main__':
 
     address, naxos_path = parse_config(sys.argv)
 
-    selector = selectors.DefaultSelector()
-
     queue = util.PollableQueue()
+    selector = selectors.DefaultSelector()
     selector.register(queue, selectors.EVENT_READ)
 
     input_thread = InputThread(queue)
     input_thread.start()
     dir_observer = DirectoryObserver(naxos_path, queue)
     dir_observer.start()
-    _httpd, remove_mapping, http_addr = get_httpd(str(naxos_path))
-    httpd = threading.Thread(target=_httpd.serve_forever)
-    httpd.setDaemon(True)
-    httpd.start()
+    httpd, remove_mapping, http_addr = get_httpd(str(naxos_path))
+    httpd_thread = threading.Thread(target=httpd.serve_forever)
+    httpd_thread.daemon = True
+    httpd_thread.start()
 
     try:
         try:
@@ -299,8 +310,7 @@ if __name__ == '__main__':
             sock.connect(address)
             selector.register(sock, selectors.EVENT_READ | selectors.EVENT_WRITE)
         except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as exception:
-            print('Could not establish connection to (%s, %s):' % address, exception)
-            raise Exception()
+            sys.exit('could not establish connection to (%s, %s):' % address, exception)
         conn = Connection(sock, known=True)
         conn.send(Message({
             'do': 'client_hello',
@@ -336,6 +346,6 @@ if __name__ == '__main__':
         input_thread.stop()
 
         # stop http server and remove upnp mapping
-        _httpd.shutdown()
+        httpd.shutdown()
         remove_mapping()
         print('Exiting...')

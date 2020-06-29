@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Paxos distributed consensus protocol, currently only Single-Paxos w/o leader."""
 
+
 class PaxosNode:
     """Maintains paxos state
     """
@@ -66,7 +67,7 @@ class PaxosNode:
             print('Rejecting Proposal: proposal_id < highest_promised')
             return
         self.accepted_value = value
-        #self.accepted_id = proposal_id  #???
+        # self.accepted_id = proposal_id  #???
         self.network_node.send(src, {
             'do': 'paxos_accept',
             'id': proposal_id

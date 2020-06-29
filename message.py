@@ -6,7 +6,7 @@ import json
 
 
 class Message(dict):
-    """Message objects are key/value pairs."""
+    """Message objects are JSON-serializable collections of key/value pairs."""
 
     def __init__(self, init):
         """Create a new Message by deepcopying the init dictionary."""

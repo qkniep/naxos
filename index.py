@@ -10,7 +10,7 @@ class Index():
     def __init__(self):
         """Creates a new empty index with no entries."""
         self.index = {}          # map filename -> client addr
-        #TODO: self.reverse_index = {}  # map client addr -> filenames
+        # TODO: self.reverse_index = {}  # map client addr -> filenames
 
     def search_entry(self, filename):
         """Searches the index for an entry exactly matching a filename.
