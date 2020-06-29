@@ -205,12 +205,12 @@ def download(path, filename, addr):
     host, port = addr
     url = 'http://%s:%s/%s' % (host, port, filename)
 
-    if (path / filename).exists:  # check if filename already used
+    if (path / filename).exists():  # check if filename already used
         i = 0
         while (path / ('%s_%s' % (filename, i))).exists:  # find one that is unused
             i += 1
         filename = '%s_%s' % (filename, i)
-        print('Saving file as %s.' % filename)
+    print('Saving file as %s.' % filename)
 
     try:  # open url, write response to file
         with urllib.request.urlopen(url) as response, open(path / filename, 'wb') as out_file:
