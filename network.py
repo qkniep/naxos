@@ -120,8 +120,9 @@ class NetworkNode:
         self.connections[addr].send(Message(payload))
 
     def broadcast(self, payload):
-        print('NUMBER OF CONNECTIONS: ', len(self.connections))
-        for conn in self.connections.values():
+        connections = list(filter(lambda x: not x.is_client(), self.connections.values()))
+        print('NUMBER OF CONNECTIONS: ', len(connections))
+        for conn in connections:
             conn.send(Message(payload))
 
     def register_forwarding(self, host, port):
