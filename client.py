@@ -189,14 +189,12 @@ def handle_queue(queue, naxos_path, sock, conn):
                 'filename': file
             }))
 
-    # TODO: this makes no sense, download should search
-    # and use the answer to make an http request to the provided ip
     elif cmd == 'download':
-        for file in payload['files']:
-            addr = RESULTS.get(file)
+        for f in payload['files']:
+            addr = RESULTS.get(f)
             if addr is not None:
-                print('Using cached address (%s:%s) for %s' % (file))
-                download(naxos_path, file, addr)
+                print('Using cached address (%s:%s) for %s' % (*addr, f))
+                download(naxos_path, f, addr)
             else:
                 print('You have to search for the file first.')  # TODO: Auto-search
     else:
@@ -209,7 +207,7 @@ def download(path, filename, addr):
 
     if (path / filename).exists:  # check if filename already used
         i = 0
-        while (path / '%s_%s' % (filename, i)).exists:  # find one that is unused
+        while (path / ('%s_%s' % (filename, i))).exists:  # find one that is unused
             i += 1
         filename = '%s_%s' % (filename, i)
         print('Saving file as %s.' % filename)
@@ -243,6 +241,8 @@ def handle_response(msg):
             RESULTS[query] = addr
         else:
             print('No results found for query: %s' % msg['query'])
+    else:
+        print(msg)
 
 
 def get_httpd(path):

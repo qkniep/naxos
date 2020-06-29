@@ -86,7 +86,8 @@ class Peer(Thread):
         elif cmd == 'hello':
             self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
         elif cmd == 'client_hello':
-            self.network.set_remote_listen_addr(sock, tuple(msg['http_addr']))
+            self.network.set_http_addr(sock, tuple(msg['http_addr']))
+            # self.network.set_remote_listen_addr(sock, tuple(msg['http_addr']))
 
         elif cmd == 'paxos_join_request':
             self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
@@ -121,7 +122,7 @@ class Peer(Thread):
                 'addr': self.index.search_entry(msg['filename']),
             })
         elif cmd == 'index_add':
-            addr = self.network.get_remote_listen_addr(sock)
+            addr = self.network.get_http_addr(sock)
             self.run_paxos({
                 'change': 'add',
                 'entry': msg['filename'],

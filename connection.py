@@ -17,8 +17,18 @@ class Connection:
         self.in_buf = b''
         self.out_buf = b''
 
+        self._is_client = False
+        self.http_addr = None
+
         if known:
             self.remote_listen_addr = sock.getpeername()
+
+    def is_client(self):
+        return self._is_client
+
+    def set_client(self, http_addr):
+        self._is_client = True
+        self.http_addr = http_addr
 
     def handle_data(self, data):
         """Append new incoming bytes data to the buffer in_buf.

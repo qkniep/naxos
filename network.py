@@ -142,6 +142,16 @@ class NetworkNode:
     def get_remote_listen_addr(self, sock):
         return self.connections[sock.getpeername()].remote_listen_addr
 
+    def set_http_addr(self, sock, http_addr):
+        self.connections[sock.getpeername()].set_client(http_addr)
+
+    def get_http_addr(self, sock):
+        conn = self.connections[sock.getpeername()]
+        if conn.is_client():
+            return conn.http_addr
+        else:
+            raise Exception("Tried to get the HTTP-server addr. for a paxos peer.")
+
     def get_socket(self, addr):
         return self.connections[addr].sock
 
