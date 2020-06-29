@@ -117,11 +117,6 @@ class DirectoryObserver(threading.Thread):
         self.running = False  # TODO: is this thread safe? (we read this variable in run)
 
 
-def scan(path):
-    """Lists (non-recursively) all files in directory."""
-    return {f.name for f in path.glob('*') if f.is_file()}
-
-
 class Client:
     SELECT_TIMEOUT = 2
     RECV_BUFFER = 1024
@@ -150,25 +145,26 @@ class Client:
         }))
 
     def handle_connections(self):
-        events = self.selector.select(timeout=self.SELECT_TIMEOUT)
-        for key, mask in events:
-            if key.fileobj is self.queue:
-                self.handle_queue()
-            elif key.fileobj is self.sock:
-                if mask & selectors.EVENT_READ:
-                    try:
-                        recv_data = self.sock.recv(self.RECV_BUFFER)
-                        if recv_data:
-                            for message in self.conn.handle_data(recv_data):
-                                log.debug(message)
-                                self.handle_response(message)
-                        else:  # connection closed
+        while True:
+            events = self.selector.select(timeout=self.SELECT_TIMEOUT)
+            for key, mask in events:
+                if key.fileobj is self.queue:
+                    self.handle_queue()
+                elif key.fileobj is self.sock:
+                    if mask & selectors.EVENT_READ:
+                        try:
+                            recv_data = self.sock.recv(self.RECV_BUFFER)
+                            if recv_data:
+                                for message in self.conn.handle_data(recv_data):
+                                    log.debug(message)
+                                    self.handle_response(message)
+                            else:  # connection closed
+                                self.reset()
+                        except (ConnectionResetError, ConnectionAbortedError):
+                            print('Connection reset/aborted:', address)
                             self.reset()
-                    except (ConnectionResetError, ConnectionAbortedError):
-                        print('Connection reset/aborted:', address)
-                        self.reset()
-                if mask & selectors.EVENT_WRITE:
-                    self.conn.flush_out_buffer()
+                    if mask & selectors.EVENT_WRITE:
+                        self.conn.flush_out_buffer()
 
     def handle_queue(self):
         cmd, payload = self.queue.get()
@@ -225,6 +221,11 @@ class Client:
         self.selector.unregister(self.sock)
         self.sock.close()
         sys.exit(0)
+
+
+def scan(path):
+    """Lists (non-recursively) all files in directory."""
+    return {f.name for f in path.glob('*') if f.is_file()}
 
 
 def parse_config(argv):
@@ -333,8 +334,7 @@ if __name__ == '__main__':
 
     try:
         client = Client(queue, address, naxos_path, http_addr)
-        while True:
-            client.handle_connections()
+        client.handle_connections()
     finally:
         dir_observer.stop()
         input_thread.stop()
