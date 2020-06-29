@@ -37,6 +37,7 @@ class NetworkNode:
         self.listen_addr = (self.upnp.externalipaddress(), port)
 
         self.register_forwarding(host, port)
+        self.port = port
 
         self.selector = selector
         self.selector.register(self.listen_sock, selectors.EVENT_READ)
@@ -120,8 +121,9 @@ class NetworkNode:
         self.connections[addr].send(Message(payload))
 
     def broadcast(self, payload):
-        print('NUMBER OF CONNECTIONS: ', len(self.connections))
-        for conn in self.connections.values():
+        connections = list(filter(lambda x: not x.is_client(), self.connections.values()))
+        print('NUMBER OF CONNECTIONS: ', len(connections))
+        for conn in connections:
             conn.send(Message(payload))
 
     def register_forwarding(self, host, port):
@@ -141,6 +143,16 @@ class NetworkNode:
 
     def get_remote_listen_addr(self, sock):
         return self.connections[sock.getpeername()].remote_listen_addr
+
+    def set_http_addr(self, sock, http_addr):
+        self.connections[sock.getpeername()].set_client(http_addr)
+
+    def get_http_addr(self, sock):
+        conn = self.connections[sock.getpeername()]
+        if conn.is_client():
+            return conn.http_addr
+        else:
+            raise Exception("Tried to get the HTTP-server addr. for a paxos peer.")
 
     def get_socket(self, addr):
         return self.connections[addr].sock
