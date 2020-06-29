@@ -26,9 +26,6 @@ from connection import Connection
 from message import Message
 
 
-# SELECT_TIMEOUT = 2
-# RECV_BUFFER = 1024
-
 class InputThread(threading.Thread):
     """Thread for handling the user input (stdin)."""
 
@@ -124,7 +121,7 @@ class Client:
     SELECT_TIMEOUT = 2
     RECV_BUFFER = 1024
 
-    def __init__(self, argv, queue, address, naxos_path, http_addr):
+    def __init__(self, queue, address, naxos_path, http_addr):
         self.address = address
         self.naxos_path = naxos_path
         self.http_addr = http_addr
@@ -147,7 +144,6 @@ class Client:
             'do': 'client_hello',
             'http_addr': self.http_addr
         }))
-
 
     def handle_connections(self):
         events = self.selector.select(timeout=self.SELECT_TIMEOUT)
@@ -207,7 +203,6 @@ class Client:
         else:
             raise ValueError('Unexpected command.')
     
-    
     def handle_response(self, msg):
         cmd = msg['do']
 
@@ -222,11 +217,11 @@ class Client:
         else:
             print(msg)
 
-
     def reset(self):
         self.selector.unregister(self.sock)
         self.sock.close()
         sys.exit(0)
+
 
 def parse_config(argv):
     config_path = Path.cwd() / 'naxos.ini'
@@ -306,6 +301,7 @@ def get_httpd(path):
 
     return socketserver.TCPServer((host, port), Handler), remove_mapping, (host, port)
 
+
 if __name__ == '__main__':
     log.basicConfig(level=log.DEBUG, filename='client_debug.log')
 
@@ -322,7 +318,7 @@ if __name__ == '__main__':
     httpd.start()
 
     try:
-        client = Client(sys.argv, queue, address, naxos_path, http_addr)
+        client = Client(queue, address, naxos_path, http_addr)
         while True:
             client.handle_connections()
     finally:

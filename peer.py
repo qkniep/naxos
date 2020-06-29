@@ -54,7 +54,6 @@ class Peer(Thread):
             print('Shutting down this peer...')
             self.network.reset()
 
-
     def handle_queue(self):
         """"""
         cmd, payload = self.queue.get()
