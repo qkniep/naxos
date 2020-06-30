@@ -93,6 +93,9 @@ class NetworkNode:
         """Try to connect to another network node under the address addr.
         Send a Message of type first_message after successfully connecting.
         This first message also contains this node's listening address.
+
+        Returns:
+            Remote address of the new socket on success, None on failure.
         """
         print('Trying to connect:', addr)
         try:
@@ -107,54 +110,61 @@ class NetworkNode:
                 'do': first_message,
                 'listen_addr': self.listen_addr,
             }))
+            return addr
         except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as error:
             print('Could not establish connection to %s: %s' % (addr, error))
+            return None
 
     def close_connection(self, addr):
-        """Close a connection to another network node."""
+        """Closes a connection to another network node."""
         self.selector.unregister(self.get_socket(addr))
         self.get_socket(addr).close()
         del self.connections[addr]
 
     def send(self, addr, payload):
-        """Send a message containing payload to the connection with addr."""
-        self.connections[addr].send(Message(payload))
+        """Sends a message containing payload to the connection with addr."""
+        self.connections[tuple(addr)].send(Message(payload))
 
     def broadcast(self, payload):
+        """Sends a message containing payload to all other PEERS (non-client connections)."""
         connections = list(filter(lambda x: not x.is_client(), self.connections.values()))
-        print('NUMBER OF CONNECTIONS: ', len(connections))
         for conn in connections:
             conn.send(Message(payload))
 
     def register_forwarding(self, host, port):
-        # addportmapping(external-port, protocol, internal-host, internal-port, description, remote-host)
+        """Adds a new port forwarding rule for the specified host name and port."""
         self.upnp.addportmapping(port, 'TCP', host, port, 'Naxos', '')
 
     def remove_forwarding(self):
-        # deleteportmapping(external-port, protocol, description)
+        """Deletes the port forwarding rule for our port."""
         self.upnp.deleteportmapping(self.port, 'TCP', 'Naxos')
 
+    # XXX deprecated?
     def is_done(self):
         return self.done
 
     def set_remote_listen_addr(self, sock, listen_addr):
+        """Sets the remote_listen_addr of the remote paxos peer connected via sock."""
         conn = self.connections[sock.getpeername()]
         conn.remote_listen_addr = listen_addr
 
     def get_remote_listen_addr(self, sock):
+        """Returns the remote_listen_addr of the remote paxos peer conencted via sock."""
         return self.connections[sock.getpeername()].remote_listen_addr
 
     def set_http_addr(self, sock, http_addr):
+        """Sets the address where a client's HTTP server runs."""
         self.connections[sock.getpeername()].set_client(http_addr)
 
     def get_http_addr(self, sock):
+        """Returns the address where a client's HTTP server runs."""
         conn = self.connections[sock.getpeername()]
-        if conn.is_client():
-            return conn.http_addr
-        else:
-            raise Exception("Tried to get the HTTP-server addr. for a paxos peer.")
+        if not conn.is_client():
+            raise Exception("Tried to get the HTTP-server address for a paxos peer.")
+        return conn.http_addr
 
     def get_socket(self, addr):
+        """Returns the socket corresponding to the connection based on the remote peer's address."""
         return self.connections[addr].sock
 
     def get_random_listen_addr(self):
@@ -162,7 +172,8 @@ class NetworkNode:
         return random.choice(list(self.connections.values())).remote_listen_addr
 
     def unique_id_from_own_addr(self):
-        host, port = self.listen_sock.getsockname()
+        """Deterministically generates a single integer ID from this network node's address."""
+        host, port = self.listen_addr
         ip_int = struct.unpack("!I", socket.inet_aton(host))[0]
         return ip_int * 65536 + port
 

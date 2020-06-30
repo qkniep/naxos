@@ -115,10 +115,13 @@ class DirectoryObserver(threading.Thread):
             print('shutting down observer. :<')
 
     def stop(self):
+        """Terminates this thread."""
         self.running = False  # TODO: is this thread safe? (we read this variable in run)
 
 
 class Client:
+    """"""
+
     SELECT_TIMEOUT = 2
     RECV_BUFFER = 1024
 
@@ -168,6 +171,9 @@ class Client:
                         self.conn.flush_out_buffer()
 
     def handle_queue(self):
+        """Handles a user command from the thread-safe queue.
+        This command probably came from the CLI (stdin) thread.
+        """
         cmd, payload = self.queue.get()
         if cmd == 'quit':
             self.reset()
@@ -194,17 +200,18 @@ class Client:
                 }))
 
         elif cmd == 'download':
-            for f in payload['files']:
-                addr = self.results.get(f)
+            for file in payload['files']:
+                addr = self.results.get(file)
                 if addr is not None:
-                    print('Using cached address (%s:%s) for %s' % (*addr, f))
-                    download(self.naxos_path, f, addr)
+                    print('Using cached address (%s:%s) for %s' % (*addr, file))
+                    download(self.naxos_path, file, addr)
                 else:
                     print('You have to search for the file first.')  # TODO: Auto-search
         else:
             raise ValueError('Unexpected command.')
 
     def handle_response(self, msg):
+        """Handles a response message we got from an index server."""
         cmd = msg['do']
 
         if cmd == 'index_search_result':
@@ -219,6 +226,7 @@ class Client:
             print(msg)
 
     def reset(self):
+        """Cleanup deregister FDs at selector and close sockets, finally exit."""
         self.selector.unregister(self.sock)
         self.sock.close()
         sys.exit(0)
@@ -230,6 +238,7 @@ def scan(path):
 
 
 def parse_config(argv):
+    """Parses the Naxos configuration file."""
     config_path = Path.cwd() / 'naxos.ini'
     host = None
     port = None

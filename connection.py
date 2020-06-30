@@ -26,9 +26,11 @@ class Connection:
             self.remote_listen_addr = None
 
     def is_client(self):
+        """Returns true if the remote node is a Naxos client, false otherwise."""
         return self._is_client
 
     def set_client(self, http_addr):
+        """Specifies that the remote node is a Naxos client, listening to on http_addr."""
         self._is_client = True
         self.http_addr = http_addr
 

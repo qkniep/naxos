@@ -3,16 +3,21 @@
 
 
 class PaxosNode:
-    """Maintains paxos state
+    """Maintains paxos state.
     """
 
-    def __init__(self, network_node, num_peers=1):
+    def __init__(self, network_node, num_peers=1, leader=None):
         """Initializes a new paxos node."""
         node_id = network_node.unique_id_from_own_addr()
         print('This peer is now operating Paxos node', node_id)
         print('Paxos group size is', num_peers)
         self.network_node = network_node
+        self.peer_addresses = {}  # map node_id -> remote socket addr
         self.group_size = num_peers
+        if leader is None:
+            self.current_leader = (node_id, self.network_node.listen_addr)
+        else:
+            self.current_leader = leader
         self.current_id = (0, node_id)
         self.highest_promised = (0, 0)
         self.promises = 1
@@ -21,16 +26,24 @@ class PaxosNode:
         self.chosen = False
 
     def start_paxos_round(self, value):
-        """Starts a paxos round by sending the prepare.
+        """Starts a paxos round.
+
+        Relays the value to the leader or sends the prepare if we are leader.
         Ultimately we try to get value chosen.
         """
-        self.current_id = (self.current_id[0] + 1, self.current_id[1])
-        self.network_node.broadcast({
-            'do': 'paxos_prepare',
-            'id': self.current_id,
-        })
-        self.accepted_value = value  # XXX
-        self.promises = 1
+        if self.current_leader[0] == self.node_id():
+            self.current_id = (self.current_id[0] + 1, self.current_id[1])
+            self.network_node.broadcast({
+                'do': 'paxos_prepare',
+                'id': self.current_id,
+            })
+            self.accepted_value = value  # XXX
+            self.promises = 1
+        else:
+            self.network_node.send(self.peer_addresses[self.current_leader[0]], {
+                'do': 'paxos_relay',
+                'value': value,
+            })
 
     def handle_prepare(self, src, proposal_id):
         """Handles a paxos prepare message."""
@@ -94,5 +107,14 @@ class PaxosNode:
         self.accepted_value = value
         self.chosen = True
 
+    def add_peer_addr(self, node_id, addr):
+        """Adds a mapping (node ID -> address) to this peer's list of such mappings."""
+        self.peer_addresses[node_id] = addr
+
     def majority(self):
+        """Returns the number of peers needed for a majority (strictly more than 50%)."""
         return (self.group_size) // 2 + 1
+
+    def node_id(self):
+        """Returns this peer's paxos node ID."""
+        return self.current_id[1]
