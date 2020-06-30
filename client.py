@@ -16,7 +16,8 @@ import socketserver
 import sys
 import threading
 import time
-import urllib
+import urllib.error
+import urllib.request
 
 from pathlib import Path
 
@@ -311,7 +312,8 @@ def get_httpd(path):
             pass
     remove_mapping = lambda: upnp.deleteportmapping(port, 'TCP', 'Naxos')
 
-    return socketserver.TCPServer((host, port), handler), remove_mapping, (host, port)
+    public_host = upnp.externalipaddress()
+    return socketserver.TCPServer((host, port), handler), remove_mapping, (public_host, port)
 
 
 if __name__ == '__main__':

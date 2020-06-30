@@ -127,16 +127,22 @@ class Peer(Thread):
             })
         elif cmd == 'index_add':
             addr = self.network.get_http_addr(sock)
-            self.run_paxos({
-                'change': 'add',
-                'entry': msg['filename'],
-                'addr': addr,
-            })
+            if self.paxos.group_size == 1:
+                self.index.add_entry(msg['filename'], addr)
+            else:
+                self.run_paxos({
+                    'change': 'add',
+                    'entry': msg['filename'],
+                    'addr': addr,
+                })
         elif cmd == 'index_remove':
-            self.run_paxos({
-                'change': 'remove',
-                'entry': msg['filename'],
-            })
+            if self.paxos.group_size == 1:
+                self.index.remove_entry(msg['filename'])
+            else:
+                self.run_paxos({
+                    'change': 'remove',
+                    'entry': msg['filename'],
+                })
 
     def _stop(self):
         self.running = False
@@ -172,7 +178,8 @@ class Peer(Thread):
             self.index.remove_entry(value['entry'])
 
     def send_paxos_join_confirmation(self, addr):
-        peers = [c.remote_listen_addr for a, c in self.network.connections.items() if a != addr]
+        peers = [c.remote_listen_addr for a, c in self.network.connections.items()
+                if a != addr and c.remote_listen_addr is not None]
         self.network.send(addr, {
             'do': 'paxos_join_confirm',
             'group_size': self.paxos.group_size,

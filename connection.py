@@ -22,6 +22,8 @@ class Connection:
 
         if known:
             self.remote_listen_addr = sock.getpeername()
+        else:
+            self.remote_listen_addr = None
 
     def is_client(self):
         return self._is_client
