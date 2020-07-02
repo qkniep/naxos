@@ -19,7 +19,6 @@ class NetworkNode:
     Listen for incoming connections, establish connections to other network nodes.
     """
 
-    DEFAULT_PORT = 63000
     RECV_BUFFER = 2048
 
     def __init__(self, selector):
@@ -32,12 +31,21 @@ class NetworkNode:
         self.upnp.discover()
         self.upnp.selectigd()
 
-        host = self.upnp.lanaddr
-        self.listen_sock, port = create_listening_socket(host, self.DEFAULT_PORT)
-        self.listen_addr = (self.upnp.externalipaddress(), port)
+        found_port = False
+        while not found_port:
+            host = self.upnp.lanaddr
+            port = random.randint(1024, 65535)
+            self.listen_sock, port = create_listening_socket(host, port)
+            self.listen_addr = (self.upnp.externalipaddress(), port)
 
-        self.register_forwarding(host, port)
-        self.port = port
+            try:
+                self.register_forwarding(host, port)
+            except miniupnpc.ConflictInMappingEntry:
+                self.listen_sock.close()
+                continue
+
+            self.port = port
+            found_port = True
 
         self.selector = selector
         self.selector.register(self.listen_sock, selectors.EVENT_READ)
