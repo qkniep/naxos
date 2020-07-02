@@ -106,10 +106,10 @@ class NetworkNode:
 
             conn = Connection(sock, known=True)
             self.connections[addr] = conn
-            conn.send(Message({
+            self.send(addr, {
                 'do': first_message,
                 'listen_addr': self.listen_addr,
-            }))
+            })
             return addr
         except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as error:
             print('Could not establish connection to %s: %s' % (addr, error))
@@ -123,6 +123,8 @@ class NetworkNode:
 
     def send(self, addr, payload):
         """Sends a message containing payload to the connection with addr."""
+        if 'from' not in payload:
+            payload['from'] = self.unique_id_from_own_addr()
         self.connections[tuple(addr)].send(Message(payload))
 
     def broadcast(self, payload):

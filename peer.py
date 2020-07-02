@@ -8,6 +8,7 @@ import sys
 import time
 from threading import Thread
 
+from cache import Cache
 from index import Index
 from message import Message
 from network import NetworkNode
@@ -32,6 +33,7 @@ class Peer(Thread):
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.queue, selectors.EVENT_READ)
         self.network = NetworkNode(self.selector)
+        self.cache = Cache()
         if first:
             self.paxos = PaxosNode(self.network)
         else:
@@ -52,6 +54,7 @@ class Peer(Thread):
                         self.network.accept_incoming_connection()
                     else:
                         for msg in self.network.service_connection(key.fileobj, mask):
+                            self.cache.process(key.fileobj, msg)
                             self.handle_message(key.fileobj, msg)
         finally:
             print('Shutting down this peer...')
