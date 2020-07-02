@@ -102,8 +102,8 @@ class Peer(Thread):
 
         elif cmd == 'paxos_join_request':
             self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
-            if self.paxos.group_size == 1:
-                self.paxos.group_size += 1
+            if self.paxos.group_sizes[self.paxos.next_index] == 1:
+                self.paxos.group_sizes[self.paxos.next_index] += 1
                 self.send_paxos_join_confirmation(sock.getpeername())
             else:
                 self.run_paxos({
@@ -118,14 +118,14 @@ class Peer(Thread):
         elif cmd == 'paxos_promise':
             self.paxos.handle_promise(tuple(msg['id']), msg['accepted'])
         elif cmd == 'paxos_propose':
-            self.paxos.handle_propose(sock.getpeername(), tuple(msg['id']), msg['value'])
+            self.paxos.handle_propose(sock.getpeername(), tuple(msg['id']), msg['index'], msg['value'])
         elif cmd == 'paxos_accept':
-            chosen_value = self.paxos.handle_accept(tuple(msg['id']))
+            index, chosen_value = self.paxos.handle_accept(tuple(msg['id']), msg['index'])
             if chosen_value is not None:
-                self.apply_chosen_value(chosen_value, self_started_round=True)
+                self.apply_chosen_value(index, chosen_value, self_started_round=True)
         elif cmd == 'paxos_learn':
-            self.apply_chosen_value(msg['value'])
-            self.paxos.handle_learn(tuple(msg['id']), msg['value'])
+            self.apply_chosen_value(msg['index'], msg['value'])
+            self.paxos.handle_learn(tuple(msg['id']), msg['index'], msg['value'])
 
         elif cmd == 'index_search':
             self.network.send(sock.getpeername(), {
@@ -135,7 +135,7 @@ class Peer(Thread):
             })
         elif cmd == 'index_add':
             addr = self.network.get_http_addr(sock)
-            if self.paxos.group_size == 1:
+            if self.paxos.group_sizes[self.paxos.next_index] == 1:
                 self.index.add_entry(msg['filename'], addr)
             else:
                 self.run_paxos({
@@ -144,7 +144,7 @@ class Peer(Thread):
                     'addr': addr,
                 })
         elif cmd == 'index_remove':
-            if self.paxos.group_size == 1:
+            if self.paxos.group_sizes[self.paxos.next_index] == 1:
                 self.index.remove_entry(msg['filename'])
             else:
                 self.run_paxos({
@@ -167,14 +167,23 @@ class Peer(Thread):
             'value': value,
         }))
 
-    def apply_chosen_value(self, value, self_started_round=False):
+    def apply_chosen_value(self, index, value, self_started_round=False):
         """Applies the changes needed after selecting value through paxos.
         Might handle these changes differently based on whether we started the paxos round.
         """
+        if len(self.paxos.group_sizes) > index:
+            self.paxos.group_sizes.append(self.paxos.group_sizes[index] + 1)
+            while len(self.paxos.accepted_values) > index and self.paxos.accepted_values[index] is not None:
+                if self.paxos.accepted_values[index]['change'] == 'join':
+                    self.paxos.group_sizes.append(self.paxos.group_sizes[index+1] + 1)
+                else:
+                    self.paxos.group_sizes.append(self.paxos.group_sizes[index+1])
+                index += 1
+
         if value['change'] == 'join':
-            self.paxos.group_size += 1
             conn_addresses = [c.sock.getpeername() for c in self.network.connections.values()]
             if tuple(value['respond_addr']) in conn_addresses:
+                print(self.network.listen_addr)
                 self.send_paxos_join_confirmation(tuple(value['respond_addr']))
         elif value['change'] == 'add':
             self.index.add_entry(value['entry'], value['addr'])
@@ -192,7 +201,7 @@ class Peer(Thread):
         self.network.send(addr, {
             'do': 'paxos_join_confirm',
             'my_node_id': self.paxos.node_id(),
-            'group_size': self.paxos.group_size,
+            'group_size': self.paxos.group_sizes[self.paxos.next_index],  # TODO: maybe remove (unnecessary)
             'leader': self.paxos.current_leader,
             'index': self.index.to_json(),
             'peers': peers,
