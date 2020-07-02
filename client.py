@@ -317,7 +317,7 @@ def get_httpd(path):
         try:
             upnp.addportmapping(port, 'TCP', host, port, 'Naxos HTTP Server', '')
             break  # no exception, so mapping worked
-        except miniupnpc.ConflictInMappingEntry:
+        except:
             pass
     remove_mapping = lambda: upnp.deleteportmapping(port, 'TCP', 'Naxos')
 

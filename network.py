@@ -40,12 +40,14 @@ class NetworkNode:
 
             try:
                 self.register_forwarding(host, port)
-            except miniupnpc.ConflictInMappingEntry:
+            except:
                 self.listen_sock.close()
                 continue
 
             self.port = port
             found_port = True
+        print('This peer is listening for incoming connections on:', (host, port))
+        log.debug('listening on (%s, %s)', host, port)
 
         self.selector = selector
         self.selector.register(self.listen_sock, selectors.EVENT_READ)
@@ -196,8 +198,6 @@ def create_listening_socket(host, port=0):
         sock.listen()
         sock.setblocking(False)
         _port = sock.getsockname()[1]
-        print('This peer is listening for incoming connections on:', (host, _port))
-        log.debug('listening on (%s, %s)', host, _port)
 
         return sock, _port
     except Exception as exception:
