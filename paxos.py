@@ -10,7 +10,7 @@ class PaxosNode:
         """Initializes a new paxos node."""
         node_id = network_node.unique_id_from_own_addr()
         print('This peer is now operating Paxos node', node_id)
-        print('Paxos group size is', num_peers)
+        print('Paxos group size currently is', num_peers)
         self.network_node = network_node
         self.peer_addresses = {}  # map node_id -> remote socket addr
         if num_peers == 1:

@@ -12,7 +12,6 @@ from index import Index
 from message import Message
 from network import NetworkNode
 from paxos import PaxosNode
-import util
 
 
 class Peer(Thread):
@@ -22,33 +21,30 @@ class Peer(Thread):
     """
 
     SELECT_TIMEOUT = 1
-    VERSION = '0.2.0'
+    VERSION = '0.3.0'
 
-    def __init__(self, first=False):
+    def __init__(self, first=True, addr=None):
         """"""
         super().__init__()  # Thread constructor
 
-        self.queue = util.PollableQueue()
         self.selector = selectors.DefaultSelector()
-        self.selector.register(self.queue, selectors.EVENT_READ)
         self.network = NetworkNode(self.selector)
         if first:
             self.paxos = PaxosNode(self.network)
         else:
             self.paxos = None
+            self.connect_to_paxos(addr)
         self.index = Index()
-        self.running = True
+        self._running = True
 
     def run(self):  # called by Thread.start()
-        """Main loop: Handles incoming messages and commands sent from main thread."""
+        """Main loop: Handles incoming messages from other peers and commands from main thread."""
         print('Running Naxos v' + self.VERSION)
         try:
-            while self.running:
+            while self._running:
                 events = self.selector.select(timeout=self.SELECT_TIMEOUT)
                 for key, mask in events:
-                    if key.fileobj is self.queue:
-                        self.handle_queue()
-                    elif key.fileobj is self.network.listen_sock:
+                    if key.fileobj is self.network.listen_sock:
                         self.network.accept_incoming_connection()
                     else:
                         for msg in self.network.service_connection(key.fileobj, mask):
@@ -56,20 +52,6 @@ class Peer(Thread):
         finally:
             print('Shutting down this peer...')
             self.network.reset()
-
-    def handle_queue(self):
-        """Handles the next incoming message on the thread-safe queue.
-        The message was sent either by this thread or the CLI (stdin) thread.
-        """
-        cmd, payload = self.queue.get()
-        if cmd == 'connect':
-            self.network.connect_to_node(payload['addr'], 'paxos_join_request')
-            # TODO: add to self.paxos.peer_addresses
-        elif cmd == 'start_paxos':
-            if self.paxos is not None:
-                self.paxos.start_paxos_round(payload['value'])
-        else:
-            raise ValueError('Unknown command: %s' % cmd)
 
     def handle_message(self, sock, msg):
         """Handles the Message msg, which arrived at the socket sock.
@@ -98,7 +80,6 @@ class Peer(Thread):
             self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
         elif cmd == 'client_hello':
             self.network.set_http_addr(sock, tuple(msg['http_addr']))
-            # self.network.set_remote_listen_addr(sock, tuple(msg['http_addr']))
 
         elif cmd == 'paxos_join_request':
             self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
@@ -122,7 +103,7 @@ class Peer(Thread):
         elif cmd == 'paxos_accept':
             index, chosen_value = self.paxos.handle_accept(tuple(msg['id']), msg['index'])
             if chosen_value is not None:
-                self.apply_chosen_value(index, chosen_value, self_started_round=True)
+                self.apply_chosen_value(index, chosen_value)
         elif cmd == 'paxos_learn':
             self.apply_chosen_value(msg['index'], msg['value'])
             self.paxos.handle_learn(tuple(msg['id']), msg['index'], msg['value'])
@@ -153,21 +134,19 @@ class Peer(Thread):
                 })
 
     def stop(self):
-        self.running = False
+        """Stop this Peer's thread from running, initiating clean shutdown."""
+        self._running = False
 
     def connect_to_paxos(self, addr):
-        """Adds a 'connect' command to the command queue."""
-        self.queue.put(('connect', {
-            'addr': addr,
-        }))
+        """."""
+        self.network.connect_to_node(addr, 'paxos_join_request')
 
     def run_paxos(self, value):
-        """Adds a 'start_paxos' command to the command queue."""
-        self.queue.put(('start_paxos', {
-            'value': value,
-        }))
+        """."""
+        if self.paxos is not None:
+            self.paxos.start_paxos_round(value)
 
-    def apply_chosen_value(self, index, value, self_started_round=False):
+    def apply_chosen_value(self, index, value):
         """Applies the changes needed after selecting value through paxos.
         Might handle these changes differently based on whether we started the paxos round.
         """
@@ -214,10 +193,11 @@ if __name__ == '__main__':
         sys.exit('Usage: python peer.py (ip port)')
 
     log.basicConfig(level=log.DEBUG, filename='debug.log')
-    peer = Peer(NUM_ARGS == 1)
+    if NUM_ARGS == 1:
+        peer = Peer()
+    elif NUM_ARGS == 3:
+        peer = Peer(False, (sys.argv[1], int(sys.argv[2])))
     peer.start()
-    if NUM_ARGS == 3:
-        peer.connect_to_paxos((sys.argv[1], int(sys.argv[2])))
     try:
         while True:
             time.sleep(1)
