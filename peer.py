@@ -129,6 +129,13 @@ class Peer(Thread):
         log.info('[IN]:\t%s' % msg)
 
         cmd = msg['do']
+        to = msg['to']
+
+        if to not in (self.network.unique_id_from_own_addr(), 'broadcast'):
+            # forward messages that are not for this peer.
+            # if it is a broadcast, cmd handling should call broadcast.
+            self.network.send(to, msg)
+            return
 
         if cmd == 'ping':
             from_ = msg['from']
@@ -138,8 +145,8 @@ class Peer(Thread):
             })
             self.network.broadcast(msg, sock)
         elif cmd == 'ping_response':
-            if self.network.unique_id_from_own_addr() == msg['to']:  # response is for me
-                self.network.address_pool.add(tuple(msg['addr']))  # remember this addr
+            # has to be for this peer, since it would have been forwardet otherwise.
+            self.network.address_pool.add(tuple(msg['addr']))  # remember this addr
 
         if cmd == 'paxos_join_confirm':
             self.paxos = PaxosNode(self.network, msg['group_size'], msg['leader'])
