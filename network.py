@@ -35,6 +35,7 @@ class NetworkNode:
         host = self.upnp.lanaddr
         self.listen_sock, port = create_listening_socket(host, self.DEFAULT_PORT)
         self.listen_addr = (self.upnp.externalipaddress(), port)
+        print('This peer is listening for incoming connections on:', self.listen_addr)
 
         self.register_forwarding(host, port)
         self.port = port
@@ -43,6 +44,7 @@ class NetworkNode:
         self.selector.register(self.listen_sock, selectors.EVENT_READ)
 
         self.cache = cache
+        self.address_pool = set()
 
         self.connections = {}  # map address -> Connection object
         self.done = False
@@ -126,15 +128,21 @@ class NetworkNode:
     def send(self, to, payload):
         """Sends a message containing payload to the paxos peer."""
         sock = self.cache.route(to)
+        if sock == 'broadcast':  # no route found for this naxos id
+            self.broadcast(payload)
+            return
+        
         if 'from' not in payload:
             payload['from'] = self.unique_id_from_own_addr()
         if 'to' not in payload:
             payload['to'] = to
-        if sock == 'broadcast':  # no route found for this naxos id
-            self.broadcast(payload)
-            return
         addr = sock.getpeername()
-        self.connections[tuple(addr)].send(Message(payload))
+
+        try:
+            self.connections[tuple(addr)].send(Message(payload))
+        except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as error:
+            print("Connection to %s aborted: %s. Fallback to broadcasting..." % (addr, error))
+            self.broadcast(payload)
 
     def broadcast(self, payload, sock=None):
         """Sends a message containing payload to all other PEERS (non-client connections). If sock is not None, do not send it to that connection."""
@@ -194,6 +202,8 @@ class NetworkNode:
         ip_int = struct.unpack("!I", socket.inet_aton(host))[0]
         return ip_int * 65536 + port
 
+    def is_connected(self, addr):
+        return addr in self.connections
 
 def create_listening_socket(host, port=0):
     """Create a new listening socket on this node.
@@ -205,7 +215,7 @@ def create_listening_socket(host, port=0):
         sock.listen()
         sock.setblocking(False)
         _port = sock.getsockname()[1]
-        print('This peer is listening for incoming connections on:', (host, _port))
+        # print('This peer is listening for incoming connections on:', (host, _port))
         log.debug('listening on (%s, %s)', host, _port)
 
         return sock, _port
