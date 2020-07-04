@@ -31,15 +31,18 @@ class Peer(Thread):
 
         self.queue = util.PollableQueue()
         self.selector = selectors.DefaultSelector()
-        self.selector.register(self.queue, selectors.EVENT_READ)
-        self.network = NetworkNode(self.selector)
         self.cache = Cache()
+        self.index = Index()
+        self.network = NetworkNode(self.selector, self.cache)
+        
         if first:
             self.paxos = PaxosNode(self.network)
         else:
             self.paxos = None
-        self.index = Index()
+        
         self.running = True
+
+        self.selector.register(self.queue, selectors.EVENT_READ)
 
     def run(self):  # called by Thread.start()
         """Main loop: Handles incoming messages and commands sent from main thread."""
@@ -68,6 +71,11 @@ class Peer(Thread):
         if cmd == 'connect':
             self.network.connect_to_node(payload['addr'], 'paxos_join_request')
             # TODO: add to self.paxos.peer_addresses
+        elif cmd == 'first_connection':
+            self.network.connect_to_node(payload['addr'])
+            self.network.broadcast({
+                'do': 'ping',
+            })
         elif cmd == 'start_paxos':
             if self.paxos is not None:
                 self.paxos.start_paxos_round(payload['value'])
@@ -81,6 +89,20 @@ class Peer(Thread):
         print('[IN]:\t%s' % msg)
 
         cmd = msg['do']
+
+        if cmd == 'ping':
+            from_ = msg['from']
+            self.network.send(from_, {
+                'do': 'ping_response',
+                'addr': self.network.listen_addr,
+            })
+            self.network.broadcast(msg, sock)
+        elif cmd == 'ping_response':
+            if self.network.unique_id_from_own_addr() == msg['to']:  # response is for me
+                print(msg)
+            else:
+                self.network.send(msg['to'], msg)
+
         if cmd == 'paxos_join_confirm':
             self.paxos = PaxosNode(self.network, msg['group_size'], msg['leader'])
             self.paxos.add_peer_addr(msg['my_node_id'], sock.getpeername())
@@ -90,12 +112,12 @@ class Peer(Thread):
                 addr = self.network.connect_to_node(tuple(listen_addr))
                 self.paxos.add_peer_addr(node_id, addr)
 
-        elif self.paxos is None:  # do not handle other Messages if not yet part of Paxos
-            if self.network.connections:
-                self.network.send(sock.getpeername(), Message({
-                    'do': 'try_other_peer',
-                    'addr': self.network.get_random_listen_addr(),
-                }))
+        # elif self.paxos is None:  # do not handle other Messages if not yet part of Paxos
+        #     if self.network.connections:
+        #         self.network.send(sock.getpeername(), {
+        #             'do': 'try_other_peer',
+        #             'addr': self.network.get_random_listen_addr(),
+        #         })
 
         elif cmd == 'hello':
             self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
@@ -201,6 +223,11 @@ class Peer(Thread):
             'peers': peers,
         })
 
+    def connect(self, addr):
+        self.queue.put(('first_connection', {
+            'addr': addr,
+        }))
+
 
 if __name__ == '__main__':
     NUM_ARGS = len(sys.argv)
@@ -211,7 +238,9 @@ if __name__ == '__main__':
     peer = Peer(NUM_ARGS == 1)
     peer.start()
     if NUM_ARGS == 3:
-        peer.connect_to_paxos((sys.argv[1], int(sys.argv[2])))
+        addr = (sys.argv[1], int(sys.argv[2]))
+        peer.connect(addr)
+        # peer.connect_to_paxos((sys.argv[1], int(sys.argv[2])))
     try:
         while True:
             time.sleep(1)

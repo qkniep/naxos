@@ -22,7 +22,7 @@ class NetworkNode:
     DEFAULT_PORT = 63000
     RECV_BUFFER = 2048
 
-    def __init__(self, selector):
+    def __init__(self, selector, cache):
         """Create new network node with uPnP forwarding and a listening socket.
         All opened sockets are registered with selector (select wrapper).
         """
@@ -41,6 +41,8 @@ class NetworkNode:
 
         self.selector = selector
         self.selector.register(self.listen_sock, selectors.EVENT_READ)
+
+        self.cache = cache
 
         self.connections = {}  # map address -> Connection object
         self.done = False
@@ -121,15 +123,28 @@ class NetworkNode:
         self.get_socket(addr).close()
         del self.connections[addr]
 
-    def send(self, addr, payload):
-        """Sends a message containing payload to the connection with addr."""
+    def send(self, to, payload):
+        """Sends a message containing payload to the paxos peer."""
+        sock = self.cache.route(to)
         if 'from' not in payload:
             payload['from'] = self.unique_id_from_own_addr()
+        if 'to' not in payload:
+            payload['to'] = to
+        if sock == 'broadcast':  # no route found for this naxos id
+            self.broadcast(payload)
+            return
+        addr = sock.getpeername()
         self.connections[tuple(addr)].send(Message(payload))
 
-    def broadcast(self, payload):
-        """Sends a message containing payload to all other PEERS (non-client connections)."""
-        connections = list(filter(lambda x: not x.is_client(), self.connections.values()))
+    def broadcast(self, payload, sock=None):
+        """Sends a message containing payload to all other PEERS (non-client connections). If sock is not None, do not send it to that connection."""
+        connections = [x for x in self.connections.values() if (not x.is_client() and x.sock != sock)]  # filter client and connection the message came from (alway true if sock is None)
+
+        if 'from' not in payload:
+            payload['from'] = self.unique_id_from_own_addr()
+        if 'to' not in payload:
+            payload['to'] = 'broadcast'
+
         for conn in connections:
             conn.send(Message(payload))
 

@@ -53,7 +53,7 @@ class Connection:
 
     def send(self, msg):
         """Prepare Message msg to be sent over this connection."""
-        log.debug('[OUT]:\t%s', msg.serialize())
+        print('[OUT]:\t%s' % msg.serialize())
         self.out_buf += util.encode_data(msg.serialize()) + util.DELIMITER
 
     def flush_out_buffer(self):
