@@ -12,7 +12,7 @@ class Connection:
     """
 
     def __init__(self, sock, known=False):
-        print('Connection created:', sock.getsockname())
+        log.info('Connection created: %s', sock.getsockname())
         self.sock = sock
         self.in_buf = b''
         self.out_buf = b''
@@ -53,7 +53,7 @@ class Connection:
 
     def send(self, msg):
         """Prepare Message msg to be sent over this connection."""
-        print('[OUT]:\t%s' % msg.serialize())
+        log.info('[OUT]:\t%s' % msg.serialize())
         self.out_buf += util.encode_data(msg.serialize()) + util.DELIMITER
 
     def flush_out_buffer(self):

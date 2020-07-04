@@ -35,7 +35,6 @@ class NetworkNode:
         host = self.upnp.lanaddr
         self.listen_sock, port = create_listening_socket(host, self.DEFAULT_PORT)
         self.listen_addr = (self.upnp.externalipaddress(), port)
-        print('This peer is listening for incoming connections on:', self.listen_addr)
 
         self.register_forwarding(host, port)
         self.port = port
@@ -76,7 +75,7 @@ class NetworkNode:
                     log.debug('closing connection to %s', str(addr))
                     self.close_connection(addr)
             except (ConnectionResetError, ConnectionAbortedError):
-                print('Connection reset/aborted:', addr)
+                log.info('Connection reset/aborted: %s', addr)
                 self.close_connection(addr)
         if mask & selectors.EVENT_WRITE:
             conn.flush_out_buffer()
@@ -101,7 +100,7 @@ class NetworkNode:
         Returns:
             Remote address of the new socket on success, None on failure.
         """
-        print('Trying to connect:', addr)
+        log.info('Trying to connect: %s', addr)
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect(addr)
@@ -116,7 +115,7 @@ class NetworkNode:
             })
             return addr
         except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as error:
-            print('Could not establish connection to %s: %s' % (addr, error))
+            log.info('Could not establish connection to %s: %s' % (addr, error))
             return None
 
     def close_connection(self, addr):
@@ -141,7 +140,7 @@ class NetworkNode:
         try:
             self.connections[tuple(addr)].send(Message(payload))
         except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as error:
-            print("Connection to %s aborted: %s. Fallback to broadcasting..." % (addr, error))
+            log.info("Connection to %s aborted: %s. Fallback to broadcasting..." % (addr, error))
             self.broadcast(payload)
 
     def broadcast(self, payload, sock=None):
@@ -215,8 +214,6 @@ def create_listening_socket(host, port=0):
         sock.listen()
         sock.setblocking(False)
         _port = sock.getsockname()[1]
-        # print('This peer is listening for incoming connections on:', (host, _port))
-        log.debug('listening on (%s, %s)', host, _port)
 
         return sock, _port
     except Exception as exception:

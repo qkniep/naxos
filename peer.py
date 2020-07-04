@@ -19,7 +19,7 @@ import util
 
 
 def watch_address_pool(context: dict):
-    print("Checking address pool...")
+    log.debug("Checking address pool...")
     net = context['network']
     pool = net.address_pool
     old = context['old']
@@ -51,14 +51,22 @@ class Peer(Thread):
         self.cache = Cache()
         self.index = Index()
         self.network = NetworkNode(self.selector, self.cache)
-
-        self.periodic_runner = PeriodicRunner()
-        self.periodic_runner.start()
         
         if first:
             self.paxos = PaxosNode(self.network)
+            paxos_header = '- This peer is now operating Paxos node %s' % self.paxos.node_id()
         else:
             self.paxos = None
+            paxos_header = '- This peer is not yet operating as a Paxos node.'
+            
+        self.periodic_runner = PeriodicRunner()
+        self.periodic_runner.start()
+        
+        naxos_header = '- Running Naxos v%s' % self.VERSION
+        net_header = '- This peer is listening for incoming connections on: %s:%s' % self.network.listen_addr
+        mid = '='*max(len(naxos_header), len(net_header), len(paxos_header))
+
+        print('\n'.join((mid, naxos_header, net_header, paxos_header, mid)))
         
         self.running = True
 
@@ -66,7 +74,6 @@ class Peer(Thread):
 
     def run(self):  # called by Thread.start()
         """Main loop: Handles incoming messages and commands sent from main thread."""
-        print('Running Naxos v' + self.VERSION)
         try:
             while self.running:
                 events = self.selector.select(timeout=self.SELECT_TIMEOUT)
@@ -80,7 +87,7 @@ class Peer(Thread):
                             self.cache.process(key.fileobj, msg)
                             self.handle_message(key.fileobj, msg)
         finally:
-            print('Shutting down this peer...')
+            log.info('Shutting down this peer...')
             self.periodic_runner.stop()
             self.network.reset()
 
@@ -104,7 +111,7 @@ class Peer(Thread):
             }, 3)
         elif cmd == 'connect_to_sampled':
             picked = payload['picked']
-            print(picked)
+            log.debug("picked: %s", picked)
             for addr in picked:
                 self.network.connect_to_node(addr)
             self.periodic_runner.unregister(watch_address_pool)
@@ -119,7 +126,7 @@ class Peer(Thread):
         """Handles the Message msg, which arrived at the socket sock.
         The message might have been sent by another paxos peer or a client.
         """
-        print('[IN]:\t%s' % msg)
+        log.info('[IN]:\t%s' % msg)
 
         cmd = msg['do']
 
@@ -133,8 +140,6 @@ class Peer(Thread):
         elif cmd == 'ping_response':
             if self.network.unique_id_from_own_addr() == msg['to']:  # response is for me
                 self.network.address_pool.add(tuple(msg['addr']))  # remember this addr
-            else:
-                self.network.send(msg['to'], msg)  # forward it
 
         if cmd == 'paxos_join_confirm':
             self.paxos = PaxosNode(self.network, msg['group_size'], msg['leader'])
@@ -267,7 +272,22 @@ if __name__ == '__main__':
     if NUM_ARGS not in [1, 3]:
         sys.exit('Usage: python peer.py (ip port)')
 
-    log.basicConfig(level=log.DEBUG, filename='debug.log')
+    # set up logging to file - see previous section for more details
+    log.basicConfig(level=log.DEBUG,
+                        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                        datefmt='%m-%d %H:%M',
+                        filename='debug.log',
+                        filemode='w')
+    # define a Handler which writes INFO messages or higher to the sys.stderr
+    console = log.StreamHandler()
+    console.setLevel(log.INFO)
+    # set a format which is simpler for console use
+    formatter = log.Formatter('%(asctime)s %(message)s\n', '%H:%M')
+    # tell the handler to use this format
+    console.setFormatter(formatter)
+    # add the handler to the root logger
+    log.getLogger('').addHandler(console)
+
     peer = Peer(NUM_ARGS == 1)
     peer.start()
     if NUM_ARGS == 3:

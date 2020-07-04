@@ -1,3 +1,4 @@
+import logging as log
 import threading
 import time
 import heapq as hp
@@ -24,9 +25,9 @@ class PeriodicRunner(threading.Thread):
         hp.heappush(self.pq, (now+timing, len(self.functions)-1))
 
     def unregister(self, func):  # TODO: Thread safe. Locks?
-        print("Unregister function %s" % func.__name__)
+        log.debug("Unregister function %s" % func.__name__)
         if len(self.functions) == 0:
-            print("No functions registered.")
+            log.debug("No functions registered.")
             return
         index = -1
         for i, t in enumerate(self.functions):
@@ -34,7 +35,7 @@ class PeriodicRunner(threading.Thread):
                 index = i
                 break
         if index == -1:
-            print("Functions %s not found" % func.__name__)
+            log.debug("Functions %s not found" % func.__name__)
             return
         #  keep fields, so that the pq doesn't have to be updated.
         self.contexts[index] = None
@@ -55,7 +56,7 @@ class PeriodicRunner(threading.Thread):
 
             delta = (t - datetime.now()).total_seconds()  # amount of time we have to sleep in seconds
             if delta < 0:  # if it is negative, we missed the timeslot
-                print("Couldn't keep up! Missed running %s it by %s s" % (func.__name__, abs(delta)))
+                log.debug("Couldn't keep up! Missed running %s it by %s s" % (func.__name__, abs(delta)))
             else:
                 time.sleep(delta)
             # execute the function, then readd it to the pq
