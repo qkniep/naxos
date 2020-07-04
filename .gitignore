@@ -6,4 +6,5 @@ __pycache__
 naxos.code-workspace
 test.py
 echo_server.py
-cats
+cats*
+miniupnpc*
