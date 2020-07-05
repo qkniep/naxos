@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Overlay P2P network of peers running paxos to maintain a consistent index."""
 
+import copy
 import logging as log
 import random
 import selectors
@@ -31,6 +32,8 @@ def watch_address_pool(context: dict):
         queue.put(('connect_to_sampled', {
             'picked': picked
         }))
+    else:
+        context['old'] = copy.copy(pool)
 
 
 class Peer(Thread):
@@ -84,8 +87,9 @@ class Peer(Thread):
                         self.network.accept_incoming_connection()
                     else:
                         for msg in self.network.service_connection(key.fileobj, mask):
-                            self.cache.process(key.fileobj, msg)
+                            self.cache.update_routing(key.fileobj.getpeername(), msg)
                             self.handle_message(key.fileobj, msg)
+                            self.cache.processed(key.fileobj.getpeername(), msg)
         finally:
             log.info('Shutting down this peer...')
             self.periodic_runner.stop()
@@ -107,7 +111,7 @@ class Peer(Thread):
             self.periodic_runner.register(watch_address_pool, {
                 'queue': self.queue,
                 'network': self.network,
-                'old': self.network.address_pool,
+                'old': set(),
             }, 3)
         elif cmd == 'connect_to_sampled':
             picked = payload['picked']
@@ -127,26 +131,41 @@ class Peer(Thread):
         The message might have been sent by another paxos peer or a client.
         """
         log.info('[IN]:\t%s' % msg)
+        if self.cache.seen(msg):
+            print("Skip handling message since it has already been handled.")
+            return
 
         cmd = msg['do']
         to = msg['to']
 
+
+        # forward messages that are not for this peer.
+        # if it is a broadcast, cmd handling should call broadcast.
         if to not in (self.network.unique_id_from_own_addr(), 'broadcast'):
-            # forward messages that are not for this peer.
-            # if it is a broadcast, cmd handling should call broadcast.
+            log.info("Forward message")
             self.network.send(to, msg)
             return
 
+        # ping broadcast to discover peers in the network
         if cmd == 'ping':
-            from_ = msg['from']
-            self.network.send(from_, {
+            self.network.send(msg['from'], {
                 'do': 'ping_response',
                 'addr': self.network.listen_addr,
             })
             self.network.broadcast(msg, sock)
+        
+        # response to a ping broadcast to the one who initially sent the ping, delivering own addr
         elif cmd == 'ping_response':
             # has to be for this peer, since it would have been forwardet otherwise.
             self.network.address_pool.add(tuple(msg['addr']))  # remember this addr
+        
+        # broadcast to analyze the overlay structure
+        elif cmd == 'discover_overlay':
+            self.network.send(msg['from'], {
+                'do': 'discover_overlay_response',
+                'neighbours': [conn.get_identifier() for conn in self.network.connections.values() if not conn.is_client()]
+            })
+            self.network.broadcast(msg, sock)
 
         if cmd == 'paxos_join_confirm':
             self.paxos = PaxosNode(self.network, msg['group_size'], msg['leader'])
@@ -279,7 +298,6 @@ if __name__ == '__main__':
     if NUM_ARGS not in [1, 3]:
         sys.exit('Usage: python peer.py (ip port)')
 
-    # set up logging to file - see previous section for more details
     log.basicConfig(level=log.DEBUG,
                         format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
                         datefmt='%m-%d %H:%M',

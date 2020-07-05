@@ -5,6 +5,7 @@ import base64
 import os
 import queue
 import socket
+import struct
 
 DELIMITER = b'|'
 
@@ -17,6 +18,12 @@ def encode_data(data):
 def decode_data(data):
     """Base64-decode data returning the original string."""
     return base64.b64decode(data).decode('utf-8')
+
+
+def identifier(host, port):
+    """Deterministically generates a single integer ID from address."""
+    ip_int = struct.unpack("!I", socket.inet_aton(host))[0]
+    return ip_int * 65536 + port
 
 
 class PollableQueue(queue.Queue):

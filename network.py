@@ -5,12 +5,12 @@ import logging as log
 import random
 import selectors
 import socket
-import struct
 
 import miniupnpc
 
 from connection import Connection
 from message import Message
+from util import identifier
 
 
 class NetworkNode:
@@ -78,7 +78,10 @@ class NetworkNode:
                 log.info('Connection reset/aborted: %s', addr)
                 self.close_connection(addr)
         if mask & selectors.EVENT_WRITE:
-            conn.flush_out_buffer()
+            try:
+                conn.flush_out_buffer()
+            except OSError as e:
+                log.info("Error sending to peer: %s", e)
 
     def reset(self):
         """Reset everything to the state after the node was created."""
@@ -122,12 +125,13 @@ class NetworkNode:
         """Closes a connection to another network node."""
         self.selector.unregister(self.get_socket(addr))
         self.get_socket(addr).close()
+        log.info("Closing connection %s", str(addr))
         del self.connections[addr]
 
     def send(self, to, payload):
         """Sends a message containing payload to the paxos peer."""
-        sock = self.cache.route(to)
-        if sock == 'broadcast':  # no route found for this naxos id
+        addr = self.cache.route(to)
+        if addr == 'broadcast':  # no route found for this naxos id
             self.broadcast(payload)
             return
         
@@ -135,11 +139,10 @@ class NetworkNode:
             payload['from'] = self.unique_id_from_own_addr()
         if 'to' not in payload:
             payload['to'] = to
-        addr = sock.getpeername()
 
         try:
             self.connections[tuple(addr)].send(Message(payload))
-        except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as error:
+        except Exception as error:
             log.info("Connection to %s aborted: %s. Fallback to broadcasting..." % (addr, error))
             self.broadcast(payload)
 
@@ -197,9 +200,7 @@ class NetworkNode:
 
     def unique_id_from_own_addr(self):
         """Deterministically generates a single integer ID from this network node's address."""
-        host, port = self.listen_addr
-        ip_int = struct.unpack("!I", socket.inet_aton(host))[0]
-        return ip_int * 65536 + port
+        return identifier(*self.listen_addr)
 
     def is_connected(self, addr):
         return addr in self.connections

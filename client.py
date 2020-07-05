@@ -3,6 +3,7 @@
 """Naxos client CLI."""
 
 import configparser
+import copy
 import functools
 import http.server
 import logging as log
@@ -18,6 +19,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 
 from pathlib import Path
 
@@ -26,6 +28,8 @@ import miniupnpc
 import util
 from connection import Connection
 from message import Message
+from periodic_runner import PeriodicRunner
+from util import identifier
 
 
 class InputThread(threading.Thread):
@@ -48,6 +52,7 @@ class InputThread(threading.Thread):
                 continue
             cmd, *args = shlex.split(line)
 
+            # search files
             if cmd in ('search', 's'):
                 if len(args) == 0:
                     print('Usage: > search <filename1> <filename2> ...')
@@ -56,6 +61,7 @@ class InputThread(threading.Thread):
                 self.queue.put(('search', {
                     'files': args
                 }))
+            # download files
             elif cmd in ('download', 'd'):
                 if len(args) == 0:
                     print('Usage: > download <filename1> <filename2> ...')
@@ -64,10 +70,16 @@ class InputThread(threading.Thread):
                 self.queue.put(('download', {
                     'files': args
                 }))
-            elif cmd == 'quit':
+            # print overlay structure
+            elif cmd in ('overlay', 'o'):
+                self.queue.put(('discover_overlay', {}))
+            # exit
+            elif cmd in ('quit', 'exit', 'q'):
                 self.queue.put(('quit', {}))
+            # invalid cmd
             else:
-                print('Usage: > (search|download) <filename1> <filename2> ...')
+                print('Usage: > (search|download|overlay) <filename1> <filename2> ...')
+                print('Type (quit|exit|q) to exit the client.')
 
     def stop(self):
         self.running = False  # TODO: is this thread safe? (we read this variable in run)
@@ -126,6 +138,7 @@ class Client:
     RECV_BUFFER = 1024
 
     def __init__(self, queue, address, naxos_path, http_addr):
+        self.id = None
         self.address = address
         self.naxos_path = naxos_path
         self.http_addr = http_addr
@@ -136,39 +149,55 @@ class Client:
 
         self.results = {}
 
+        self.overlay_edges = set()
+        self.running = True
+
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect(self.address)
             self.selector.register(self.sock, selectors.EVENT_READ | selectors.EVENT_WRITE)
+            self.id = identifier(*self.sock.getsockname())
         except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as exception:
-            sys.exit('Could not establish connection to (%s, %s):' % self.address, exception)
+            sys.exit('Could not establish connection to (%s, %s):' % (self.address, exception))
+
+        self.periodic_runner = PeriodicRunner()
+        self.periodic_runner.start()
+
         self.conn = Connection(self.sock, known=True)
-        self.conn.send(Message({
+        self.send({
             'do': 'client_hello',
             'http_addr': self.http_addr
-        }))
+        })
+
+    def send(self, payload):
+        payload['to'] = 'broadcast'
+        self.conn.send(Message(payload, self.id))
 
     def handle_connections(self):
-        while True:
-            events = self.selector.select(timeout=self.SELECT_TIMEOUT)
-            for key, mask in events:
-                if key.fileobj is self.queue:
-                    self.handle_queue()
-                elif key.fileobj is self.sock:
-                    if mask & selectors.EVENT_READ:
-                        try:
-                            recv_data = self.sock.recv(self.RECV_BUFFER)
-                            if recv_data:
-                                for message in self.conn.handle_data(recv_data):
-                                    log.debug(message)
-                                    self.handle_response(message)
-                            else:  # connection closed
+        try:
+            while self.running:
+                events = self.selector.select(timeout=self.SELECT_TIMEOUT)
+                for key, mask in events:
+                    if key.fileobj is self.queue:
+                        self.handle_queue()
+                    elif key.fileobj is self.sock:
+                        if mask & selectors.EVENT_READ:
+                            try:
+                                recv_data = self.sock.recv(self.RECV_BUFFER)
+                                if recv_data:
+                                    for message in self.conn.handle_data(recv_data):
+                                        log.debug(message)
+                                        self.handle_response(message)
+                                else:  # connection closed
+                                    print("Connection closed")
+                                    self.reset()
+                            except (ConnectionResetError, ConnectionAbortedError):
+                                print('Connection reset/aborted:', address)
                                 self.reset()
-                        except (ConnectionResetError, ConnectionAbortedError):
-                            print('Connection reset/aborted:', address)
-                            self.reset()
-                    if mask & selectors.EVENT_WRITE:
-                        self.conn.flush_out_buffer()
+                        if mask & selectors.EVENT_WRITE:
+                            self.conn.flush_out_buffer()
+        finally:
+            print("Shutting down.")
 
     def handle_queue(self):
         """Handles a user command from the thread-safe queue.
@@ -176,28 +205,28 @@ class Client:
         """
         cmd, payload = self.queue.get()
         if cmd == 'quit':
-            self.reset()
+            self.running = False
 
         elif cmd == 'insert':
             for file in payload['files']:
-                self.conn.send(Message({
+                self.send({
                     'do': 'index_add',
                     'filename': file
-                }))
+                })
 
         elif cmd == 'delete':
             for file in payload['files']:
-                self.conn.send(Message({
+                self.send({
                     'do': 'index_remove',
                     'filename': file
-                }))
+                })
 
         elif cmd == 'search':
             for file in payload['files']:
-                self.conn.send(Message({
+                self.send({
                     'do': 'index_search',
                     'filename': file
-                }))
+                })
 
         elif cmd == 'download':
             for file in payload['files']:
@@ -207,11 +236,28 @@ class Client:
                     download(self.naxos_path, file, addr)
                 else:
                     print('You have to search for the file first.')  # TODO: Auto-search
+
+        elif cmd == 'discover_overlay':
+            self.send({
+                'do': 'discover_overlay'
+            })
+            self.periodic_runner.register(watch_edges, {
+                'client': self,
+                'old': set(),
+                'queue': self.queue,
+            }, 1)
+        
+        elif cmd == 'print_overlay':
+            self.periodic_runner.unregister(watch_edges)
+            layout = 'graph {\n\t'+ '\n\t'.join(('%s -- %s' % e for e in self.overlay_edges)) +'\n}\n'
+            print('Visit the following webpage for a visualization of the overlay:')
+            print('https://dreampuf.github.io/GraphvizOnline/#' + urllib.parse.quote(layout))
         else:
-            raise ValueError('Unexpected command.')
+            raise ValueError('Unexpected command %s' % cmd)
 
     def handle_response(self, msg):
         """Handles a response message we got from an index server."""
+        log.info('[IN]:\t%s' % msg)
         cmd = msg['do']
 
         if cmd == 'index_search_result':
@@ -222,14 +268,16 @@ class Client:
                 self.results[query] = addr
             else:
                 print('No results found for query: %s' % msg['query'])
+        elif cmd == 'discover_overlay_response':
+            self.overlay_edges |= {(msg['from'], n) for n in msg['neighbours']}
         else:
             print(msg)
 
     def reset(self):
         """Cleanup deregister FDs at selector and close sockets, finally exit."""
+        self.periodic_runner.stop()
         self.selector.unregister(self.sock)
         self.sock.close()
-        sys.exit(0)
 
 
 def scan(path):
@@ -325,8 +373,25 @@ def get_httpd(path):
     return socketserver.TCPServer((host, port), handler), remove_mapping, (public_host, port)
 
 
+def watch_edges(context: dict):
+    client = context['client']
+    edges = client.overlay_edges
+    old = context['old']
+    queue = context['queue']
+
+    diff = edges - old
+    if diff == set():
+        queue.put(('print_overlay', {}))
+    else:
+        context['old'] = copy.copy(edges)
+
+
 if __name__ == '__main__':
-    log.basicConfig(level=log.DEBUG, filename='client_debug.log')
+    log.basicConfig(level=log.DEBUG,
+                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                    datefmt='%m-%d %H:%M',
+                    filename='client.log',
+                    filemode='w')
 
     address, naxos_path = parse_config(sys.argv)
 
@@ -347,6 +412,10 @@ if __name__ == '__main__':
         client = Client(queue, address, naxos_path, http_addr)
         client.handle_connections()
     finally:
+        try:
+            client.reset()
+        except NameError:
+            pass
         dir_observer.stop()
         input_thread.stop()
 

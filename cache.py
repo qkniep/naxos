@@ -1,6 +1,7 @@
 import copy
 from socket import socket
 
+from connection import Connection
 from message import Message
 
 
@@ -10,12 +11,15 @@ class Cache:
         self.message_cache = {}
         self.routing_cache = {}
 
-    def process(self, origin: socket, msg: Message):  # origin is a socket, msg a Message object
-        self.message_cache[msg['id']] = (origin, msg)
+    def update_routing(self, origin: tuple, msg: Message):
+        print("Update routing info: %s over %s" % (msg['from'], origin))
         self.routing_cache[msg['from']] = origin
-        
-    def route(self, dest: str):  # returns a socket or 'broadcast'
+    
+    def processed(self, origin: tuple, msg: Message):
+        self.message_cache[msg['id']] = (origin, msg)
+
+    def route(self, dest: str):
         return self.routing_cache.get(dest, 'broadcast')
 
-    def seen(self, msg: Message):  # msg is a Message object, returns a boolean
+    def seen(self, msg: Message):
         return msg['id'] in self.message_cache
