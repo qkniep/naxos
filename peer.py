@@ -132,7 +132,7 @@ class Peer(Thread):
         """
         log.info('[IN]:\t%s' % msg)
         if self.cache.seen(msg):
-            print("Skip handling message since it has already been handled.")
+            log.info("Skip handling message since it has already been handled.")
             return
 
         cmd = msg['do']

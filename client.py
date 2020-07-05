@@ -38,17 +38,9 @@ class InputThread(threading.Thread):
         super().__init__()  # Thread constructor
 
         self.wait = threading.Event()
-        self.unblock()
 
         self.queue = queue
         self.running = True
-
-    def block(self):
-        self.wait.clear()
-    
-    def unblock(self):
-        self.wait.set()
-
 
     def run(self):  # called by Thread.start()
         try:
@@ -94,12 +86,18 @@ class InputThread(threading.Thread):
                 elif cmd in ('quit', 'exit', 'q'):
                     self.block()
                     self.queue.put(('quit', {}))
-                # invalid cmd
+                # invalid cmd or help
                 else:
                     print('Usage: > (search|download|overlay) <filename>')
                     print('Type (quit|exit|q) to exit the client.')
         finally:
             log.debug("shutting down input thread :<")
+
+    def block(self):
+        self.wait.clear()
+    
+    def unblock(self):
+        self.wait.set()
 
     def stop(self):
         self.running = False  # TODO: is this thread safe? (we read this variable in run)
@@ -180,7 +178,7 @@ class Client:
             self.selector.register(self.sock, selectors.EVENT_READ | selectors.EVENT_WRITE)
             self.id = util.identifier(*self.sock.getsockname())
         except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as exception:
-            sys.exit('Could not establish connection to (%s, %s):' % (self.address, exception))
+            sys.exit('Could not establish connection to %s: %s' % (self.address, exception))
 
         self.periodic_runner = PeriodicRunner()
         self.periodic_runner.start()
@@ -190,6 +188,7 @@ class Client:
             'do': 'client_hello',
             'http_addr': self.http_addr
         })
+        self.input_thread.unblock()
 
     def send(self, payload):
         payload['to'] = 'broadcast'
@@ -276,6 +275,7 @@ class Client:
             layout = 'strict graph {\n\t'+ '\n\t'.join(('%s -- %s' % e for e in self.overlay_edges)) +'\n}\n'
             print('Visit the following webpage for a visualization of the overlay:')
             print(tiny_url('https://dreampuf.github.io/GraphvizOnline/#' + urllib.parse.quote(layout)))
+            print('Shortened since the link can get really big.')
             self.input_thread.unblock()
         else:
             raise ValueError('Unexpected command %s' % cmd)
@@ -445,6 +445,8 @@ if __name__ == '__main__':
     try:
         client = Client(queue, input_thread, address, naxos_path, http_addr)
         client.handle_connections()
+    except KeyboardInterrupt:
+        pass
     finally:
         try:
             client.reset()

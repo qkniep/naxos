@@ -1,4 +1,5 @@
 import copy
+import logging as log
 from socket import socket
 
 from connection import Connection
@@ -12,7 +13,7 @@ class Cache:
         self.routing_cache = {}
 
     def update_routing(self, origin: tuple, msg: Message):
-        print("Update routing info: %s over %s" % (msg['from'], origin))
+        log.debug("Update routing info: %s over %s" % (msg['from'], origin))
         self.routing_cache[msg['from']] = origin
     
     def processed(self, origin: tuple, msg: Message):
