@@ -17,6 +17,7 @@ import socketserver
 import sys
 import threading
 import time
+import urllib.request
 import urllib
 
 from pathlib import Path
@@ -36,50 +37,73 @@ class InputThread(threading.Thread):
         """"""
         super().__init__()  # Thread constructor
 
+        self.wait = threading.Event()
+        self.unblock()
+
         self.queue = queue
         self.running = True
 
+    def block(self):
+        self.wait.clear()
+    
+    def unblock(self):
+        self.wait.set()
+
+
     def run(self):  # called by Thread.start()
-        while self.running:
-            try:
-                line = input('> ')
-            except EOFError:
-                sys.exit(0)
-            if line == '':
-                continue
-            cmd, *args = shlex.split(line)
-
-            # search files
-            if cmd in ('search', 's'):
-                if len(args) == 0:
-                    print('Usage: > search <filename1> <filename2> ...')
+        try:
+            while self.running:
+                if not self.wait.is_set():
+                    print("...")
+                    self.wait.wait()
+                    if not self.running:
+                        break
+                try:
+                    line = input('> ')
+                except EOFError:
+                    sys.exit(0)
+                if line == '':
                     continue
+                cmd, *args = shlex.split(line)
 
-                self.queue.put(('search', {
-                    'files': args
-                }))
-            # download files
-            elif cmd in ('download', 'd'):
-                if len(args) == 0:
-                    print('Usage: > download <filename1> <filename2> ...')
-                    continue
+                # search files
+                if cmd in ('search', 's'):
+                    if len(args) == 0:
+                        print('Usage: > search <filename>')
+                        continue
 
-                self.queue.put(('download', {
-                    'files': args
-                }))
-            # print overlay structure
-            elif cmd in ('overlay', 'o'):
-                self.queue.put(('discover_overlay', {}))
-            # exit
-            elif cmd in ('quit', 'exit', 'q'):
-                self.queue.put(('quit', {}))
-            # invalid cmd
-            else:
-                print('Usage: > (search|download|overlay) <filename1> <filename2> ...')
-                print('Type (quit|exit|q) to exit the client.')
+                    self.block()
+                    self.queue.put(('search', {
+                        'file': args[0],
+                    }))
+                # download files
+                elif cmd in ('download', 'd'):
+                    if len(args) == 0:
+                        print('Usage: > download <filename>')
+                        continue
+
+                    self.block()
+                    self.queue.put(('download', {
+                        'file': args[0],
+                    }))
+                # print overlay structure
+                elif cmd in ('overlay', 'o'):
+                    self.block()
+                    self.queue.put(('discover_overlay', {}))
+                # exit
+                elif cmd in ('quit', 'exit', 'q'):
+                    self.block()
+                    self.queue.put(('quit', {}))
+                # invalid cmd
+                else:
+                    print('Usage: > (search|download|overlay) <filename>')
+                    print('Type (quit|exit|q) to exit the client.')
+        finally:
+            log.debug("shutting down input thread :<")
 
     def stop(self):
         self.running = False  # TODO: is this thread safe? (we read this variable in run)
+        self.unblock()
 
 
 class DirectoryObserver(threading.Thread):
@@ -108,12 +132,12 @@ class DirectoryObserver(threading.Thread):
                 new = files - old
                 removed = old - files
                 if new:  # new files detected
-                    print('new: %s' % new)
+                    log.debug('new: %s' % new)
                     self.queue.put(('insert', {
                         'files': list(new)
                     }))
                 if removed:  # removed files detected
-                    print('delete: %s' % removed)
+                    log.debug('delete: %s' % removed)
                     self.queue.put(('delete', {
                         'files': list(removed)
                     }))
@@ -121,7 +145,7 @@ class DirectoryObserver(threading.Thread):
                 files = scan(self.path)
                 time.sleep(self.CHECK_INTERVAL)
         finally:
-            print('shutting down observer. :<')
+            log.debug('shutting down observer. :<')
 
     def stop(self):
         """Terminates this thread."""
@@ -134,12 +158,13 @@ class Client:
     SELECT_TIMEOUT = 2
     RECV_BUFFER = 1024
 
-    def __init__(self, queue, address, naxos_path, http_addr):
+    def __init__(self, queue, input_thread, address, naxos_path, http_addr):
         self.id = None
         self.address = address
         self.naxos_path = naxos_path
         self.http_addr = http_addr
 
+        self.input_thread = input_thread
         self.selector = selectors.DefaultSelector()
         self.queue = queue
         self.selector.register(queue, selectors.EVENT_READ)
@@ -186,15 +211,15 @@ class Client:
                                         log.debug(message)
                                         self.handle_response(message)
                                 else:  # connection closed
-                                    print("Connection closed")
+                                    log.debug("Connection closed")
                                     self.reset()
                             except (ConnectionResetError, ConnectionAbortedError):
-                                print('Connection reset/aborted:', address)
+                                log.debug('Connection reset/aborted: %s', address)
                                 self.reset()
                         if mask & selectors.EVENT_WRITE:
                             self.conn.flush_out_buffer()
         finally:
-            print("Shutting down.")
+            log.info("Shutting down.")
 
     def handle_queue(self):
         """Handles a user command from the thread-safe queue.
@@ -219,20 +244,21 @@ class Client:
                 })
 
         elif cmd == 'search':
-            for file in payload['files']:
-                self.send({
-                    'do': 'index_search',
-                    'filename': file
-                })
+            file = payload['file']
+            self.send({
+                'do': 'index_search',
+                'filename': file
+            })
 
         elif cmd == 'download':
-            for file in payload['files']:
-                addr = self.results.get(file)
-                if addr is not None:
-                    print('Using cached address (%s:%s) for %s' % (*addr, file))
-                    download(self.naxos_path, file, addr)
-                else:
-                    print('You have to search for the file first.')  # TODO: Auto-search
+            file = payload['file']
+            addr = self.results.get(file)
+            if addr is not None:
+                print('Using cached address (%s:%s) for %s' % (*addr, file))
+                download(self.naxos_path, file, addr)
+            else:
+                print('You have to search for the file first.')  # TODO: Auto-search
+            self.input_thread.unblock()
 
         elif cmd == 'discover_overlay':
             self.overlay_edges = set()
@@ -249,7 +275,8 @@ class Client:
             self.periodic_runner.unregister(watch_edges)
             layout = 'strict graph {\n\t'+ '\n\t'.join(('%s -- %s' % e for e in self.overlay_edges)) +'\n}\n'
             print('Visit the following webpage for a visualization of the overlay:')
-            print('https://dreampuf.github.io/GraphvizOnline/#' + urllib.parse.quote(layout))
+            print(tiny_url('https://dreampuf.github.io/GraphvizOnline/#' + urllib.parse.quote(layout)))
+            self.input_thread.unblock()
         else:
             raise ValueError('Unexpected command %s' % cmd)
 
@@ -266,10 +293,11 @@ class Client:
                 self.results[query] = addr
             else:
                 print('No results found for query: %s' % msg['query'])
+            self.input_thread.unblock()
         elif cmd == 'discover_overlay_response':
             self.overlay_edges |= {(msg['from'], n) for n in msg['neighbours']}
         else:
-            print(msg)
+            print("Encountered unexpected message: %s" % msg)
 
     def reset(self):
         """Cleanup deregister FDs at selector and close sockets, finally exit."""
@@ -384,6 +412,14 @@ def watch_edges(context: dict):
         context['old'] = copy.copy(edges)
 
 
+def tiny_url(url):
+    """Source: https://www.geeksforgeeks.org/python-url-shortener-using-tinyurl-api/
+    Used to create a short url for the overlay link, since it can get really big.
+    """
+    request_url = ('http://tinyurl.com/api-create.php?' + urllib.parse.urlencode({'url':url}))    
+    with urllib.request.urlopen(request_url) as response:                       
+        return response.read().decode('utf-8 ')
+
 if __name__ == '__main__':
     log.basicConfig(level=log.DEBUG,
                     format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
@@ -407,7 +443,7 @@ if __name__ == '__main__':
     httpd_thread.start()
 
     try:
-        client = Client(queue, address, naxos_path, http_addr)
+        client = Client(queue, input_thread, address, naxos_path, http_addr)
         client.handle_connections()
     finally:
         try:
