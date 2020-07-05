@@ -17,9 +17,7 @@ import socketserver
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
-import urllib.parse
+import urllib
 
 from pathlib import Path
 
@@ -29,7 +27,6 @@ import util
 from connection import Connection
 from message import Message
 from periodic_runner import PeriodicRunner
-from util import identifier
 
 
 class InputThread(threading.Thread):
@@ -156,7 +153,7 @@ class Client:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect(self.address)
             self.selector.register(self.sock, selectors.EVENT_READ | selectors.EVENT_WRITE)
-            self.id = identifier(*self.sock.getsockname())
+            self.id = util.identifier(*self.sock.getsockname())
         except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as exception:
             sys.exit('Could not establish connection to (%s, %s):' % (self.address, exception))
 
