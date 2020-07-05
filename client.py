@@ -235,6 +235,7 @@ class Client:
                     print('You have to search for the file first.')  # TODO: Auto-search
 
         elif cmd == 'discover_overlay':
+            self.overlay_edges = set()
             self.send({
                 'do': 'discover_overlay'
             })
@@ -242,11 +243,11 @@ class Client:
                 'client': self,
                 'old': set(),
                 'queue': self.queue,
-            }, 1)
+            }, 3)
         
         elif cmd == 'print_overlay':
             self.periodic_runner.unregister(watch_edges)
-            layout = 'graph {\n\t'+ '\n\t'.join(('%s -- %s' % e for e in self.overlay_edges)) +'\n}\n'
+            layout = 'strict graph {\n\t'+ '\n\t'.join(('%s -- %s' % e for e in self.overlay_edges)) +'\n}\n'
             print('Visit the following webpage for a visualization of the overlay:')
             print('https://dreampuf.github.io/GraphvizOnline/#' + urllib.parse.quote(layout))
         else:
