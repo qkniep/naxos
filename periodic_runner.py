@@ -48,6 +48,7 @@ class PeriodicRunner(threading.Thread):
     def run(self):
         while self.running:
             if len(self.pq) == 0:
+                time.sleep(0.1)
                 continue
             (t, index) = hp.heappop(self.pq)
             if self.functions[index] is None:  # handle unregistered functions

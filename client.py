@@ -302,8 +302,11 @@ class Client:
     def reset(self):
         """Cleanup deregister FDs at selector and close sockets, finally exit."""
         self.periodic_runner.stop()
-        self.selector.unregister(self.sock)
-        self.sock.close()
+        try:
+            self.selector.unregister(self.sock)
+            self.sock.close()
+        except ValueError:  # socket closed by paxos peer
+            pass
 
 
 def scan(path):
