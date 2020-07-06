@@ -6,28 +6,27 @@ class PaxosNode:
     """Maintains paxos state.
     """
 
-    def __init__(self, network_node, num_peers=1, leader=None):
+    def __init__(self, network_node, leader=None):
         """Initializes a new paxos node."""
         node_id = network_node.unique_id_from_own_addr()
         print('This peer is now operating Paxos node', node_id)
-        print('Paxos group size currently is', num_peers)
         self.network_node = network_node
         self.peer_addresses = {}  # map node_id -> remote socket addr
-        if num_peers == 1:
+        if leader is None:
             self.group_sizes = [1]
         else:
             self.group_sizes = [2]
         if leader is None:
-            self.current_leader = (node_id, self.network_node.listen_addr)
+            self.current_leader = (node_id, self.network_node.listen_addr)  # XXX: leader addr is listen address
         else:
             self.current_leader = leader
         self.current_id = (0, node_id)
         self.highest_promised = (0, 0)
+        self.highest_numbered_proposal = None
         self.promises = 1
         self.acceptances = []
-        self.accepted_values = []
+        self.log = []
         self.chosen = []
-        self.next_index = 0
 
     def start_paxos_round(self, value):
         """Starts a paxos round.
@@ -40,12 +39,11 @@ class PaxosNode:
             self.network_node.broadcast({
                 'do': 'paxos_propose',
                 'id': self.current_id,
-                'index': self.next_index,
+                'index': len(self.log),
                 'value': value
             })
-            self.accepted_values.append(value)  # XXX
+            self.log.append(value)
             self.acceptances.append(1)
-            self.next_index += 1
         else:
             self.network_node.send(self.peer_addresses[self.current_leader[0]], {
                 'do': 'paxos_relay',
@@ -61,7 +59,7 @@ class PaxosNode:
         self.network_node.send(src, {
             'do': 'paxos_promise',
             'id': proposal_id,
-            'accepted': self.accepted_value,
+            'accepted': self.log,
         })
 
     def handle_promise(self, proposal_id, value):
@@ -71,23 +69,20 @@ class PaxosNode:
             return
         self.promises += 1
         if value is not None:
-            self.accepted_value = value  # XXX only accept value with highest ID???
+            if self.highest_numbered_proposal is None or proposal_id > self.highest_numbered_proposal:
+                self.log[0] = value  # TODO: fix for multi-paxos
+                self.highest_numbered_proposal = proposal_id
         if self.promises == self.majority(0):  # TODO: self.majority(index)
-            self.acceptances = 1
-            self.network_node.broadcast({
-                'do': 'paxos_propose',
-                'id': proposal_id,
-                'value': self.accepted_value,
-            })
+            self.current_leader = (self.node_id(), self.network_node.listen_addr)
 
     def handle_propose(self, src, proposal_id, index, value):
         """Handles a paxos propose message."""
         if proposal_id < self.highest_promised:
-            print('Rejecting Proposal: proposal_id < highest_promised')  # TODO: implement NACK
+            print('Rejecting Proposal: proposal_id < highest_promised')
             return
-        while len(self.accepted_values) <= index:
-            self.accepted_values.append(None)
-        self.accepted_values[index] = value
+        while len(self.log) <= index:
+            self.log.append(None)
+        self.log[index] = value
         # self.accepted_id = proposal_id  #???
         self.network_node.send(src, {
             'do': 'paxos_accept',
@@ -104,24 +99,35 @@ class PaxosNode:
         if self.acceptances[index] == self.majority(index):
             self.network_node.broadcast({
                 'do': 'paxos_learn',
-                'id': proposal_id,
                 'index': index,
-                'value': self.accepted_values[index],
+                'value': self.log[index],
             })
             while len(self.chosen) <= index:
                 self.chosen.append(False)
             self.chosen[index] = True
-            return index, self.accepted_values[index]
+            return index, self.log[index]
         return -1, None
 
-    def handle_learn(self, _proposal_id, index, value):
+    def handle_learn(self, index, value):
         """Handles a paxos learn message."""
-        while len(self.accepted_values) <= index:
-            self.accepted_values.append(None)
-        self.accepted_values[index] = value
+        while len(self.log) <= index:
+            self.log.append(None)
+        self.log[index] = value
         while len(self.chosen) <= index:
             self.chosen.append(False)
         self.chosen[index] = True
+
+    def fix_log_holes(self, index):
+        """."""
+        up_to_date = True
+        for i in range(index+1):
+            if not self.chosen[i]:
+                up_to_date = False
+                self.network_node.send(self.peer_addresses[self.current_leader[0]], {
+                    'do': 'paxos_fill_log_hole',
+                    'index': i,
+                })
+        return up_to_date
 
     def add_peer_addr(self, node_id, addr):
         """Adds a mapping (node ID -> address) to this peer's list of such mappings."""
@@ -129,6 +135,9 @@ class PaxosNode:
 
     def majority(self, index):
         """Returns the number of peers needed for a majority (strictly more than 50%)."""
+        while index >= len(self.group_sizes):
+            if self.log[index-1]['change'] not in ['join', 'leave']:
+                index -= 1
         return (self.group_sizes[index]) // 2 + 1
 
     def node_id(self):

@@ -12,6 +12,7 @@ from index import Index
 from message import Message
 from network import NetworkNode
 from paxos import PaxosNode
+import util
 
 
 class Peer(Thread):
@@ -27,7 +28,10 @@ class Peer(Thread):
         """"""
         super().__init__()  # Thread constructor
 
+
+        self.queue = util.PollableQueue()
         self.selector = selectors.DefaultSelector()
+        self.selector.register(self.queue, selectors.EVENT_READ)
         self.network = NetworkNode(self.selector)
         if first:
             self.paxos = PaxosNode(self.network)
@@ -38,13 +42,15 @@ class Peer(Thread):
         self._running = True
 
     def run(self):  # called by Thread.start()
-        """Main loop: Handles incoming messages from other peers and commands from main thread."""
-        print('Running Naxos v' + self.VERSION)
+        """Main loop: Handles incoming connections and messages from other peers."""
+        print('Running Naxos Index Server v%s' % self.VERSION)
         try:
             while self._running:
                 events = self.selector.select(timeout=self.SELECT_TIMEOUT)
                 for key, mask in events:
-                    if key.fileobj is self.network.listen_sock:
+                    if key.fileobj is self.queue:
+                        self.handle_queue()
+                    elif key.fileobj is self.network.listen_sock:
                         self.network.accept_incoming_connection()
                     else:
                         for msg in self.network.service_connection(key.fileobj, mask):
@@ -52,6 +58,19 @@ class Peer(Thread):
         finally:
             print('Shutting down this peer...')
             self.network.reset()
+
+    def handle_queue(self):
+        """Handles the next incoming message on the thread-safe queue.
+        The message was sent either by this thread or the CLI (stdin) thread.
+        """
+        cmd, payload = self.queue.get()
+        if cmd == 'connect':
+            self.network.connect_to_node(payload['addr'], 'paxos_join_request')
+        elif cmd == 'start_paxos':
+            if self.paxos is not None:
+                self.paxos.start_paxos_round(payload['value'])
+        else:
+            raise ValueError('Unknown command: %s' % cmd)
 
     def handle_message(self, sock, msg):
         """Handles the Message msg, which arrived at the socket sock.
@@ -61,7 +80,7 @@ class Peer(Thread):
 
         cmd = msg['do']
         if cmd == 'paxos_join_confirm':
-            self.paxos = PaxosNode(self.network, msg['group_size'], msg['leader'])
+            self.paxos = PaxosNode(self.network, msg['leader'])
             self.paxos.add_peer_addr(msg['my_node_id'], sock.getpeername())
             self.index.from_json(msg['index'])
             peers = [tuple(p) for p in msg['peers']]
@@ -69,7 +88,7 @@ class Peer(Thread):
                 addr = self.network.connect_to_node(tuple(listen_addr))
                 self.paxos.add_peer_addr(node_id, addr)
 
-        elif self.paxos is None:  # do not handle other Messages if not yet part of Paxos
+        elif self.paxos is None:  # do not handle other Messages if not yet part of paxos
             if self.network.connections:
                 self.network.send(sock.getpeername(), Message({
                     'do': 'try_other_peer',
@@ -83,8 +102,8 @@ class Peer(Thread):
 
         elif cmd == 'paxos_join_request':
             self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
-            if self.paxos.group_sizes[self.paxos.next_index] == 1:
-                self.paxos.group_sizes[self.paxos.next_index] += 1
+            if self.paxos.group_sizes[len(self.paxos.log)] == 1:
+                self.paxos.group_sizes[len(self.paxos.log)] += 1
                 self.send_paxos_join_confirmation(sock.getpeername())
             else:
                 self.run_paxos({
@@ -103,10 +122,17 @@ class Peer(Thread):
         elif cmd == 'paxos_accept':
             index, chosen_value = self.paxos.handle_accept(tuple(msg['id']), msg['index'])
             if chosen_value is not None:
-                self.apply_chosen_value(index, chosen_value)
-        elif cmd == 'paxos_learn':
-            self.apply_chosen_value(msg['index'], msg['value'])
-            self.paxos.handle_learn(tuple(msg['id']), msg['index'], msg['value'])
+                self.update_paxos_log_and_apply_value(index)
+        elif cmd == 'paxos_learn':  # TODO: handle duplicate learns
+            if len(self.paxos.chosen) <= msg['index'] or not self.paxos.chosen[msg['index']]:
+                self.paxos.handle_learn(msg['index'], msg['value'])
+                self.update_paxos_log_and_apply_value(msg['index'])
+        elif cmd == 'paxos_fill_log_hole':
+            self.network.send(sock.getpeername(), {
+                'do': 'paxos_learn',
+                'index': msg['index'],
+                'value': self.paxos.log[msg['index']],
+            })
 
         elif cmd == 'index_search':
             self.network.send(sock.getpeername(), {
@@ -116,7 +142,7 @@ class Peer(Thread):
             })
         elif cmd == 'index_add':
             addr = self.network.get_http_addr(sock)
-            if self.paxos.group_sizes[self.paxos.next_index] == 1:
+            if self.paxos.group_sizes[len(self.paxos.log)] == 1:
                 self.index.add_entry(msg['filename'], addr)
             else:
                 self.run_paxos({
@@ -125,7 +151,7 @@ class Peer(Thread):
                     'addr': addr,
                 })
         elif cmd == 'index_remove':
-            if self.paxos.group_sizes[self.paxos.next_index] == 1:
+            if self.paxos.group_sizes[len(self.paxos.log)] == 1:
                 self.index.remove_entry(msg['filename'])
             else:
                 self.run_paxos({
@@ -146,18 +172,22 @@ class Peer(Thread):
         if self.paxos is not None:
             self.paxos.start_paxos_round(value)
 
+    def update_paxos_log_and_apply_value(self, index):
+        """."""
+        if self.paxos.fix_log_holes(index):
+            while len(self.paxos.chosen) > index and self.paxos.chosen[index]:
+                self.apply_chosen_value(index, self.paxos.log[index])
+                index += 1
+
     def apply_chosen_value(self, index, value):
         """Applies the changes needed after selecting value through paxos.
         Might handle these changes differently based on whether we started the paxos round.
         """
-        if len(self.paxos.group_sizes) > index:
+        assert len(self.paxos.group_sizes) > index
+        if value['change'] == 'join':
             self.paxos.group_sizes.append(self.paxos.group_sizes[index] + 1)
-            while len(self.paxos.accepted_values) > index and self.paxos.accepted_values[index] is not None:
-                if self.paxos.accepted_values[index]['change'] == 'join':
-                    self.paxos.group_sizes.append(self.paxos.group_sizes[index+1] + 1)
-                else:
-                    self.paxos.group_sizes.append(self.paxos.group_sizes[index+1])
-                index += 1
+        else:
+            self.paxos.group_sizes.append(self.paxos.group_sizes[index])
 
         if value['change'] == 'join':
             conn_addresses = [c.sock.getpeername() for c in self.network.connections.values()]
@@ -173,14 +203,11 @@ class Peer(Thread):
         """Sends a confirmation for joining the paxos overlay network to addr.
         All necessary information about the curent state of paxos is included.
         """
-        # TODO: maybe remove 'is not None'
         peers = [(n, self.network.connections[a].remote_listen_addr)
-                 for n, a in self.paxos.peer_addresses.items()
-                 if a != addr and self.network.connections[a].remote_listen_addr is not None]
+                 for n, a in self.paxos.peer_addresses.items() if a != addr]
         self.network.send(addr, {
             'do': 'paxos_join_confirm',
             'my_node_id': self.paxos.node_id(),
-            'group_size': self.paxos.group_sizes[self.paxos.next_index],  # TODO: maybe remove (unnecessary)
             'leader': self.paxos.current_leader,
             'index': self.index.to_json(),
             'peers': peers,
