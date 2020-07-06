@@ -22,6 +22,7 @@ class Peer(Thread):
     """
 
     SELECT_TIMEOUT = 1
+    KEEPALIVE_TIMEOUT = 5
     VERSION = '0.3.0'
 
     def __init__(self, first=True, addr=None):
@@ -39,6 +40,8 @@ class Peer(Thread):
             self.paxos = None
             self.connect_to_paxos(addr)
         self.index = Index()
+        self.last_keepalive = time.time()
+        self.peer_keepalives = {}
         self._running = True
 
     def run(self):  # called by Thread.start()
@@ -47,6 +50,20 @@ class Peer(Thread):
         try:
             while self._running:
                 events = self.selector.select(timeout=self.SELECT_TIMEOUT)
+                current_time = time.time()
+                if self.paxos is not None:
+                    if self.paxos.is_leader():
+                        for (node_id, last_keepalive) in self.peer_keepalives.items():
+                            if current_time - last_keepalive > 3 * self.KEEPALIVE_TIMEOUT:
+                                self.paxos.start_paxos_round({
+                                    'change': 'leave',
+                                    'node_id': node_id,
+                                })
+                    else:
+                        if current_time - self.last_keepalive > self.KEEPALIVE_TIMEOUT:
+                            self.network.send(self.paxos.peer_addresses[self.paxos.current_leader[0]],
+                                              {'do': 'keepalive', 'node_id': self.paxos.node_id()})
+                            self.last_keepalive = current_time
                 for key, mask in events:
                     if key.fileobj is self.queue:
                         self.handle_queue()
@@ -87,6 +104,8 @@ class Peer(Thread):
             for node_id, listen_addr in peers:
                 addr = self.network.connect_to_node(tuple(listen_addr))
                 self.paxos.add_peer_addr(node_id, addr)
+            self.network.send(self.paxos.peer_addresses[self.paxos.current_leader[0]],
+                              {'do': 'keepalive', 'node_id': self.paxos.node_id()})
 
         elif self.paxos is None:  # do not handle other Messages if not yet part of paxos
             if self.network.connections:
@@ -99,6 +118,8 @@ class Peer(Thread):
             self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
         elif cmd == 'client_hello':
             self.network.set_http_addr(sock, tuple(msg['http_addr']))
+        elif cmd == 'keepalive':
+            self.peer_keepalives[self.paxos.node_id()] = time.time()
 
         elif cmd == 'paxos_join_request':
             self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
@@ -186,6 +207,8 @@ class Peer(Thread):
         assert len(self.paxos.group_sizes) > index
         if value['change'] == 'join':
             self.paxos.group_sizes.append(self.paxos.group_sizes[index] + 1)
+        elif value['change'] == 'leave':
+            self.paxos.group_sizes.append(self.paxos.group_sizes[index] - 1)
         else:
             self.paxos.group_sizes.append(self.paxos.group_sizes[index])
 
@@ -194,6 +217,8 @@ class Peer(Thread):
             if tuple(value['respond_addr']) in conn_addresses:
                 print(self.network.listen_addr)
                 self.send_paxos_join_confirmation(tuple(value['respond_addr']))
+        elif value['change'] == 'leave':
+            del self.peer_keepalives[value['node_id']]
         elif value['change'] == 'add':
             self.index.add_entry(value['entry'], value['addr'])
         elif value['change'] == 'remove':

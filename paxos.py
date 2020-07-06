@@ -133,6 +133,10 @@ class PaxosNode:
         """Adds a mapping (node ID -> address) to this peer's list of such mappings."""
         self.peer_addresses[node_id] = addr
 
+    def is_leader(self):
+        """Returns whether this paxos node thinks itself to be the leader."""
+        return self.current_leader[0] == self.node_id()
+
     def majority(self, index):
         """Returns the number of peers needed for a majority (strictly more than 50%)."""
         while index >= len(self.group_sizes):
