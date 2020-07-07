@@ -131,7 +131,8 @@ class PaxosNode:
 
     def add_peer_addr(self, node_id, addr):
         """Adds a mapping (node ID -> address) to this peer's list of such mappings."""
-        self.peer_addresses[node_id] = addr
+        if self.peer_addresses.get(node_id) is None:
+            self.peer_addresses[node_id] = addr
 
     def is_leader(self):
         """Returns whether this paxos node thinks itself to be the leader."""

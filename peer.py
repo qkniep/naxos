@@ -22,7 +22,7 @@ class Peer(Thread):
     """
 
     SELECT_TIMEOUT = 1
-    KEEPALIVE_TIMEOUT = 5
+    KEEPALIVE_TIMEOUT = 30
     VERSION = '0.3.0'
 
     def __init__(self, first=True, addr=None):
@@ -59,7 +59,7 @@ class Peer(Thread):
                                     'change': 'leave',
                                     'node_id': node_id,
                                 })
-                                self.peer_keepalives[node_id] = time.time() - 2 * self.KEEPALIVE_TIMEOUT
+                                self.peer_keepalives[node_id] = current_time - 2 * self.KEEPALIVE_TIMEOUT
                     else:
                         if current_time - self.last_keepalive > self.KEEPALIVE_TIMEOUT:
                             self.network.send(self.paxos.peer_addresses[self.paxos.current_leader[0]],
@@ -216,11 +216,11 @@ class Peer(Thread):
         if value['change'] == 'join':
             conn_addresses = [c.sock.getpeername() for c in self.network.connections.values()]
             if tuple(value['respond_addr']) in conn_addresses:
-                print(self.network.listen_addr)
                 self.send_paxos_join_confirmation(tuple(value['respond_addr']))
         elif value['change'] == 'leave':
+            self.paxos.peer_addresses.pop(value['node_id'], None)
             if self.paxos.is_leader():
-                del self.peer_keepalives[value['node_id']]
+                self.peer_keepalives.pop(value['node_id'], None)
             # TODO: close gnutella connections
         elif value['change'] == 'add':
             self.index.add_entry(value['entry'], value['addr'])
