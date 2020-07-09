@@ -12,7 +12,7 @@ class Connection:
     """
 
     def __init__(self, sock, known=False):
-        print('Connection created:', sock.getsockname())
+        log.info('Connection created: %s', sock.getsockname())
         self.sock = sock
         self.in_buf = b''
         self.out_buf = b''
@@ -24,6 +24,9 @@ class Connection:
             self.remote_listen_addr = sock.getpeername()
         else:
             self.remote_listen_addr = None
+
+    def get_identifier(self):
+        return util.identifier(*self.remote_listen_addr) if self.remote_listen_addr is not None else -1
 
     def is_client(self):
         """Returns true if the remote node is a Naxos client, false otherwise."""
@@ -53,7 +56,7 @@ class Connection:
 
     def send(self, msg):
         """Prepare Message msg to be sent over this connection."""
-        log.debug('[OUT]:\t%s', msg.serialize())
+        log.info('[OUT]:   %s over %s' % (msg.serialize(), self.sock.getpeername()))
         self.out_buf += util.encode_data(msg.serialize()) + util.DELIMITER
 
     def flush_out_buffer(self):

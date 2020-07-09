@@ -5,12 +5,12 @@ import logging as log
 import random
 import selectors
 import socket
-import struct
 
 import miniupnpc
 
 from connection import Connection
 from message import Message
+from util import identifier
 
 
 class NetworkNode:
@@ -21,7 +21,7 @@ class NetworkNode:
 
     RECV_BUFFER = 2048
 
-    def __init__(self, selector):
+    def __init__(self, selector, cache):
         """Create new network node with uPnP forwarding and a listening socket.
         All opened sockets are registered with selector (select wrapper).
         """
@@ -51,6 +51,9 @@ class NetworkNode:
 
         self.selector = selector
         self.selector.register(self.listen_sock, selectors.EVENT_READ)
+
+        self.cache = cache
+        self.address_pool = set()
 
         self.connections = {}  # map address -> Connection object
         self.done = False
@@ -82,10 +85,13 @@ class NetworkNode:
                     log.debug('closing connection to %s', str(addr))
                     self.close_connection(addr)
             except (ConnectionResetError, ConnectionAbortedError):
-                print('Connection reset/aborted:', addr)
+                log.info('Connection reset/aborted: %s', addr)
                 self.close_connection(addr)
         if mask & selectors.EVENT_WRITE:
-            conn.flush_out_buffer()
+            try:
+                conn.flush_out_buffer()
+            except OSError as e:
+                log.info("Error sending to peer: %s", e)
 
     def reset(self):
         """Reset everything to the state after the node was created."""
@@ -107,7 +113,7 @@ class NetworkNode:
         Returns:
             Remote address of the new socket on success, None on failure.
         """
-        print('Trying to connect:', addr)
+        log.info('Trying to connect: %s', addr)
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect(addr)
@@ -116,28 +122,49 @@ class NetworkNode:
 
             conn = Connection(sock, known=True)
             self.connections[addr] = conn
-            conn.send(Message({
+            self.send(addr, {
                 'do': first_message,
                 'listen_addr': self.listen_addr,
-            }))
+            })
             return addr
         except (ConnectionRefusedError, ConnectionAbortedError, TimeoutError) as error:
-            print('Could not establish connection to %s: %s' % (addr, error))
+            log.info('Could not establish connection to %s: %s' % (addr, error))
             return None
 
     def close_connection(self, addr):
         """Closes a connection to another network node."""
         self.selector.unregister(self.get_socket(addr))
         self.get_socket(addr).close()
+        log.info("Closing connection %s", str(addr))
         del self.connections[addr]
 
-    def send(self, addr, payload):
-        """Sends a message containing payload to the connection with addr."""
-        self.connections[tuple(addr)].send(Message(payload))
+    def send(self, to, payload):
+        """Sends a message containing payload to the paxos peer."""
+        addr = self.cache.route(to)
+        if addr == 'broadcast':  # no route found for this naxos id
+            self.broadcast(payload)
+            return
+        
+        if 'from' not in payload:
+            payload['from'] = self.unique_id_from_own_addr()
+        if 'to' not in payload:
+            payload['to'] = to
 
-    def broadcast(self, payload):
-        """Sends a message containing payload to all other PEERS (non-client connections)."""
-        connections = list(filter(lambda x: not x.is_client(), self.connections.values()))
+        try:
+            self.connections[tuple(addr)].send(Message(payload))
+        except Exception as error:
+            log.info("Connection to %s aborted: %s. Fallback to broadcasting..." % (addr, error))
+            self.broadcast(payload)
+
+    def broadcast(self, payload, sock=None):
+        """Sends a message containing payload to all other PEERS (non-client connections). If sock is not None, do not send it to that connection."""
+        connections = [x for x in self.connections.values() if (not x.is_client() and x.sock != sock)]  # filter client and connection the message came from (alway true if sock is None)
+
+        if 'from' not in payload:
+            payload['from'] = self.unique_id_from_own_addr()
+        if 'to' not in payload:
+            payload['to'] = 'broadcast'
+
         for conn in connections:
             conn.send(Message(payload))
 
@@ -183,10 +210,10 @@ class NetworkNode:
 
     def unique_id_from_own_addr(self):
         """Deterministically generates a single integer ID from this network node's address."""
-        host, port = self.listen_addr
-        ip_int = struct.unpack("!I", socket.inet_aton(host))[0]
-        return ip_int * 65536 + port
+        return identifier(*self.listen_addr)
 
+    def is_connected(self, addr):
+        return addr in self.connections
 
 def create_listening_socket(host, port=0):
     """Create a new listening socket on this node.
