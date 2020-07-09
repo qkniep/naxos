@@ -381,7 +381,15 @@ def download(path, filename, addr):
 
 
 def get_httpd(path):
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=path)
+    class LoggingHTTPHandler(http.server.SimpleHTTPRequestHandler):
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs, directory=path)
+        
+        def log_message(self, format, *args):
+            log.debug("%s - - [%s] %s" % (self.address_string(), 
+                                          self.log_date_time_string(),
+                                          format%args))
 
     upnp = miniupnpc.UPnP()
     upnp.discoverdelay = 10
@@ -396,10 +404,10 @@ def get_httpd(path):
             break  # no exception, so mapping worked
         except:
             pass
-    remove_mapping = lambda: upnp.deleteportmapping(port, 'TCP', 'Naxos')
+    remove_mapping = lambda: upnp.deleteportmapping(port, 'TCP', 'Naxos HTTP Server')
 
     public_host = upnp.externalipaddress()
-    return socketserver.TCPServer((host, port), handler), remove_mapping, (public_host, port)
+    return socketserver.TCPServer((host, port), LoggingHTTPHandler), remove_mapping, (public_host, port)
 
 
 def watch_edges(context: dict):
