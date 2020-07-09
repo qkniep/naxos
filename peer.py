@@ -202,7 +202,6 @@ class Peer(Thread):
         if cmd == 'paxos_join_confirm':
             self.paxos = PaxosNode(self.network, msg['leader'])
             self.paxos.add_peer_addr(msg['my_node_id'], sock.getpeername())
-            self.index.from_json(msg['index'])
             peers = [tuple(p) for p in msg['peers']]
             for node_id, listen_addr in peers:
                 addr = self.network.connect_to_node(tuple(listen_addr))
@@ -226,8 +225,9 @@ class Peer(Thread):
 
         elif cmd == 'paxos_join_request':
             self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
-            if self.paxos.group_sizes[len(self.paxos.log)] == 1:
-                self.paxos.group_sizes[len(self.paxos.log)] += 1
+            index = self.paxos.get_last_applied_value_index()
+            if self.paxos.group_sizes[index] == 1:
+                self.paxos.group_sizes[index] += 1
                 self.send_paxos_join_confirmation(sock.getpeername())
             else:
                 self.run_paxos({
@@ -268,7 +268,9 @@ class Peer(Thread):
             })
         elif cmd == 'index_add':
             addr = self.network.get_http_addr(sock)
-            if self.paxos.group_sizes[len(self.paxos.log)] == 1:
+            print(self.paxos.log)
+            # if self.paxos.group_sizes[len(self.paxos.log)] == 1:
+            if self.paxos.group_sizes[self.paxos.get_last_applied_value_index()] == 1:
                 self.index.add_entry(msg['filename'], addr)
             else:
                 self.run_paxos({
@@ -341,7 +343,6 @@ class Peer(Thread):
             'do': 'paxos_join_confirm',
             'my_node_id': self.paxos.node_id(),
             'leader': self.paxos.current_leader,
-            'index': self.index.to_json(),
             'peers': peers,
         })
 

@@ -69,11 +69,7 @@ class PaxosNode:
             log.info('Rejecting Prepare: proposal_id < highest_promised')
             return
         self.highest_promised = proposal_id
-        try:
-            last_applied_index = self.chosen.index(False) - 1
-            majority = self.group_sizes[last_applied_index+1]
-        except ValueError:
-            majority = self.group_sizes[-1]
+        majority = self.majority[self.get_last_applied_value_index()]
         self.network_node.send(src, {
             'do': 'paxos_promise',
             'proposal_id': proposal_id,
@@ -103,7 +99,6 @@ class PaxosNode:
         while len(self.log) <= index:
             self.log.append(None)
         self.log[index] = value
-        # self.accepted_id = proposal_id  #???
         self.network_node.send(src, {
             'do': 'paxos_accept',
             'proposal_id': proposal_id,
@@ -157,6 +152,12 @@ class PaxosNode:
     def is_leader(self):
         """Returns whether this paxos node thinks itself to be the leader."""
         return self.current_leader[0] == self.node_id()
+
+    def get_last_applied_value_index(self):
+        try:
+            return self.chosen.index(False)
+        except ValueError:
+            return -1
 
     def majority(self, index):
         """Returns the number of peers needed for a majority (strictly more than 50%)."""
