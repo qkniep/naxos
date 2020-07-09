@@ -28,6 +28,17 @@ class PaxosNode:
         self.log = []
         self.chosen = []
 
+    def start_election(self):
+        """Tries to become the new leader through Prepare/Promise."""
+        self.current_id = (self.current_id[0] + 1, self.node_id())
+        self.promises = 1
+        print(self.network_node.connections)
+        print(self.peer_addresses)
+        self.network_node.broadcast({
+            'do': 'paxos_prepare',
+            'id': self.current_id,
+        })
+
     def start_paxos_round(self, value):
         """Starts a paxos round.
 
@@ -56,23 +67,30 @@ class PaxosNode:
             print('Rejecting Prepare: proposal_id < highest_promised')
             return
         self.highest_promised = proposal_id
+        try:
+            last_applied_index = self.chosen.index(False) - 1
+            majority = self.group_sizes[last_applied_index+1]
+        except ValueError:
+            majority = self.group_sizes[-1]
         self.network_node.send(src, {
             'do': 'paxos_promise',
             'id': proposal_id,
+            'acc_id': self.current_id,
             'accepted': self.log,
+            'majority': majority,
         })
+        self.current_leader = (proposal_id[1], self.peer_addresses[proposal_id[1]])
 
-    def handle_promise(self, proposal_id, value):
+    def handle_promise(self, proposal_id, acc_id, value, majority):
         """Handle a paxos promise message."""
         if proposal_id != self.current_id:
             print('Rejecting Promise: proposal_id != current_id')
             return
         self.promises += 1
-        if value is not None:
-            if self.highest_numbered_proposal is None or proposal_id > self.highest_numbered_proposal:
-                self.log[0] = value  # TODO: fix for multi-paxos
-                self.highest_numbered_proposal = proposal_id
-        if self.promises == self.majority(0):  # TODO: self.majority(index)
+        if self.highest_numbered_proposal is None or acc_id > self.highest_numbered_proposal:
+            self.log = value
+            self.highest_numbered_proposal = acc_id
+        if self.promises == majority:
             self.current_leader = (self.node_id(), self.network_node.listen_addr)
 
     def handle_propose(self, src, proposal_id, index, value):

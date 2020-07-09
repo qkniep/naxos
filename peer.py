@@ -22,13 +22,12 @@ class Peer(Thread):
     """
 
     SELECT_TIMEOUT = 1
-    KEEPALIVE_TIMEOUT = 30
+    KEEPALIVE_TIMEOUT = 5
     VERSION = '0.3.0'
 
     def __init__(self, first=True, addr=None):
         """"""
         super().__init__()  # Thread constructor
-
 
         self.queue = util.PollableQueue()
         self.selector = selectors.DefaultSelector()
@@ -67,6 +66,7 @@ class Peer(Thread):
     def check_keepalive_timeouts(self):
         """Check if any peer timed out long enough to assume they are offline."""
         current_time = time.time()
+        leader_id = self.paxos.current_leader[0]
         if self.paxos.is_leader():
             for (node_id, last_keepalive) in self.peer_keepalives.items():
                 if current_time - last_keepalive > 3 * self.KEEPALIVE_TIMEOUT:
@@ -74,12 +74,25 @@ class Peer(Thread):
                         'change': 'leave',
                         'node_id': node_id,
                     })
-                    self.peer_keepalives[node_id] = current_time - 2 * self.KEEPALIVE_TIMEOUT
-        else:
-            if current_time - self.last_keepalive > self.KEEPALIVE_TIMEOUT:
-                self.network.send(self.paxos.peer_addresses[self.paxos.current_leader[0]],
-                                  {'do': 'keepalive', 'node_id': self.paxos.node_id()})
-                self.last_keepalive = current_time
+                    self.peer_keepalives[node_id] = current_time - self.KEEPALIVE_TIMEOUT
+        elif leader_id in self.peer_keepalives:
+            last_leader_keepalive = self.peer_keepalives[leader_id]
+            if current_time - last_leader_keepalive > 3 * self.KEEPALIVE_TIMEOUT:  # TODO: randomize timeout
+                self.paxos.start_election()
+                self.peer_keepalives[leader_id] = current_time - self.KEEPALIVE_TIMEOUT
+
+        if current_time - self.last_keepalive > self.KEEPALIVE_TIMEOUT:
+            if self.paxos.is_leader():
+                self.network.broadcast({'do': 'keepalive', 'node_id': self.paxos.node_id()})
+            else:
+                try:
+                    self.network.send(self.paxos.peer_addresses[self.paxos.current_leader[0]],
+                                      {'do': 'keepalive', 'node_id': self.paxos.node_id()})
+                except KeyError:
+                    print('LEADER CONNECTION BROKE')
+                    self.paxos.start_election()
+                    self.peer_keepalives[leader_id] = current_time - self.KEEPALIVE_TIMEOUT
+            self.last_keepalive = current_time
 
     def handle_queue(self):
         """Handles the next incoming message on the thread-safe queue.
@@ -142,9 +155,11 @@ class Peer(Thread):
         elif cmd == 'paxos_prepare':
             self.paxos.handle_prepare(sock.getpeername(), tuple(msg['id']))
         elif cmd == 'paxos_promise':
-            self.paxos.handle_promise(tuple(msg['id']), msg['accepted'])
+            self.paxos.handle_promise(tuple(msg['id']), msg['acc_id'],
+                                      msg['accepted'], msg['majority'])
         elif cmd == 'paxos_propose':
-            self.paxos.handle_propose(sock.getpeername(), tuple(msg['id']), msg['index'], msg['value'])
+            self.paxos.handle_propose(sock.getpeername(),
+                                      tuple(msg['id']), msg['index'], msg['value'])
         elif cmd == 'paxos_accept':
             index, chosen_value = self.paxos.handle_accept(tuple(msg['id']), msg['index'])
             if chosen_value is not None:
