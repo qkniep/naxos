@@ -141,14 +141,15 @@ class NetworkNode:
     def send(self, to, payload):
         """Sends a message containing payload to the paxos peer."""
         addr = self.cache.route(to)
-        if addr == 'broadcast':  # no route found for this naxos id
-            self.broadcast(payload)
-            return
         
         if 'from' not in payload:
             payload['from'] = self.unique_id_from_own_addr()
         if 'to' not in payload:
             payload['to'] = to
+        
+        if addr == 'broadcast':  # no route found for this naxos id
+            self.broadcast(payload)
+            return
 
         try:
             self.connections[tuple(addr)].send(Message(payload))
