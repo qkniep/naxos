@@ -122,7 +122,7 @@ class NetworkNode:
 
             conn = Connection(sock, known=True)
             self.connections[addr] = conn
-            self.send(addr, {
+            self.send(identifier(*addr), {
                 'do': first_message,
                 'listen_addr': self.listen_addr,
             })
