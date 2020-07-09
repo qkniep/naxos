@@ -12,7 +12,6 @@ from threading import Thread
 
 from cache import Cache
 from index import Index
-from message import Message
 from network import NetworkNode
 from paxos import PaxosNode
 from periodic_runner import PeriodicRunner
@@ -61,6 +60,7 @@ class Peer(Thread):
         else:
             self.paxos = None
             self.connect_to_paxos(addr)
+            self.queue.put(('first_connection', {}))
             paxos_header = '- This peer is not yet operating as a Paxos node.'
         self.last_keepalive = time.time()
         self.peer_keepalives = {}
@@ -119,13 +119,8 @@ class Peer(Thread):
             if self.paxos.is_leader():
                 self.network.broadcast({'do': 'keepalive', 'node_id': self.paxos.node_id()})
             else:
-                try:
-                    self.network.send(leader_id,
-                                      {'do': 'keepalive', 'node_id': self.paxos.node_id()})
-                except KeyError:
-                    print('LEADER CONNECTION BROKE')
-                    self.paxos.start_election()
-                    self.peer_keepalives[leader_id] = current_time - self.KEEPALIVE_TIMEOUT
+                self.network.send(leader_id,
+                                  {'do': 'keepalive', 'node_id': self.paxos.node_id()})
             self.last_keepalive = current_time
 
     def handle_queue(self):
@@ -137,7 +132,7 @@ class Peer(Thread):
             self.network.connect_to_node(payload['addr'], 'paxos_join_request')
             # TODO: add to self.paxos.peer_addresses
         elif cmd == 'first_connection':
-            self.network.connect_to_node(payload['addr'])
+            # self.network.connect_to_node(payload['addr'])
             self.network.broadcast({
                 'do': 'ping',
             })
@@ -219,6 +214,7 @@ class Peer(Thread):
             self.network.set_http_addr(sock, tuple(msg['http_addr']))
         elif cmd == 'keepalive':
             self.peer_keepalives[msg['node_id']] = time.time()
+            print(self.peer_keepalives)
 
         elif cmd == 'paxos_join_request':
             self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
@@ -321,7 +317,6 @@ class Peer(Thread):
         elif value['change'] == 'leave':
             if self.paxos.is_leader():
                 self.peer_keepalives.pop(value['node_id'], None)
-            # TODO: close gnutella connections
         elif value['change'] == 'add':
             self.index.add_entry(value['entry'], value['addr'])
         elif value['change'] == 'remove':

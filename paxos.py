@@ -37,6 +37,7 @@ class PaxosNode:
             'do': 'paxos_prepare',
             'proposal_id': self.current_id,
         })
+        self.highest_promised = self.current_id
 
     def start_paxos_round(self, value):
         """Starts a paxos round.
