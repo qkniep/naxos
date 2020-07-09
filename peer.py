@@ -3,8 +3,10 @@
 """Overlay P2P network of peers running paxos to maintain a consistent index."""
 
 import copy
+import ipaddress
 import logging as log
 import random
+import re
 import selectors
 import sys
 import time
@@ -340,8 +342,8 @@ class Peer(Thread):
 
 if __name__ == '__main__':
     NUM_ARGS = len(sys.argv)
-    if NUM_ARGS not in [1, 3]:
-        sys.exit('Usage: python peer.py (ip port)')
+    if NUM_ARGS not in [1, 2]:
+        sys.exit('Usage: python peer.py (ip:port)')
 
     log.basicConfig(level=log.DEBUG,
                     format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
@@ -360,8 +362,17 @@ if __name__ == '__main__':
 
     if NUM_ARGS == 1:
         peer = Peer()
-    elif NUM_ARGS == 3:
-        peer = Peer(False, (sys.argv[1], int(sys.argv[2])))
+    elif NUM_ARGS == 2:
+        try:
+            host, port = sys.argv[1].split(':')
+            pattern = r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$'  # ipv4
+            if not re.match(pattern, host):
+                sys.exit('Ip is not a well formed IPv4 address.')
+            if ipaddress.IPv4Address(host).is_private:
+                sys.exit('Connecting to a local ip address is not allowed. Use the address printed when starting the peer you want to connect to.')
+        except (IndexError, ValueError):
+            sys.exit('Usage: python peer.py (ip:port)')
+        peer = Peer(False, (host, int(port)))
     peer.start()
     try:
         while True:
