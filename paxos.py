@@ -54,7 +54,8 @@ class PaxosNode:
                 'value': value
             })
             self.log.append(value)
-            self.acceptances.append(1)
+            while len(self.log) > len(self.acceptances):
+                self.acceptances.append(1)
         else:
             self.network_node.send(self.current_leader, {
                 'do': 'paxos_relay',
@@ -83,8 +84,9 @@ class PaxosNode:
             log.info('Rejecting Promise: proposal_id != current_id')
             return
         self.promises += 1
-        if self.highest_numbered_proposal is None or acc_id > self.highest_numbered_proposal:
-            self.log = value
+        if tuple(acc_id) > proposal_id:
+            if self.highest_numbered_proposal is None or tuple(acc_id) > self.highest_numbered_proposal:
+                self.log = value
             self.highest_numbered_proposal = acc_id
         if self.promises == majority:
             self.current_leader = self.node_id()
