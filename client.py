@@ -268,7 +268,7 @@ class Client:
                 'client': self,
                 'old': set(),
                 'queue': self.queue,
-            }, 3)
+            }, 0.5)
         
         elif cmd == 'print_overlay':
             self.periodic_runner.unregister(watch_edges)

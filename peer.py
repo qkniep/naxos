@@ -142,7 +142,7 @@ class Peer(Thread):
                 'queue': self.queue,
                 'network': self.network,
                 'old': set(),
-            }, 3)
+            }, 0.5)
         elif cmd == 'connect_to_sampled':
             picked = payload['picked']
             log.debug("picked: %s", picked)
@@ -216,7 +216,7 @@ class Peer(Thread):
             self.network.set_http_addr(sock, tuple(msg['http_addr']))
         elif cmd == 'keepalive':
             self.peer_keepalives[msg['node_id']] = time.time()
-            print(self.peer_keepalives)
+            log.debug(self.peer_keepalives)
 
         elif cmd == 'paxos_join_request':
             self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
@@ -262,7 +262,7 @@ class Peer(Thread):
             })
         elif cmd == 'index_add':
             addr = self.network.get_http_addr(sock)
-            print(self.paxos.log)
+            log.debug(self.paxos.log)
             # if self.paxos.group_sizes[len(self.paxos.log)] == 1:
             if self.paxos.group_sizes[self.paxos.get_last_applied_value_index()] == 1:
                 self.index.add_entry(msg['filename'], addr)

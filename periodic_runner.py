@@ -18,7 +18,7 @@ class PeriodicRunner(threading.Thread):
 
     def register(self, func, context, timing):
         """Register a function func to be run each timing seconds, passing context as a parameter that can keep state"""
-        if type(timing) is int:  # convert if timing is an int of seconds
+        if type(timing) is int or type(timing) is float:  # convert if timing is an int/float of seconds
             timing = timedelta(seconds=timing)
         now = datetime.now()
         self.functions.append((timing, func))

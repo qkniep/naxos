@@ -46,7 +46,6 @@ class NetworkNode:
 
             self.port = port
             found_port = True
-        print('This peer is listening for incoming connections on:', (host, port))
         log.debug('listening on (%s, %s)', host, port)
 
         self.selector = selector
