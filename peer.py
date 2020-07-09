@@ -2,17 +2,38 @@
 # -*- coding: utf-8 -*-
 """Overlay P2P network of peers running paxos to maintain a consistent index."""
 
+import copy
 import logging as log
+import random
 import selectors
 import sys
 import time
 from threading import Thread
 
+from cache import Cache
 from index import Index
 from message import Message
 from network import NetworkNode
 from paxos import PaxosNode
+from periodic_runner import PeriodicRunner
 import util
+
+
+def watch_address_pool(context: dict):
+    log.debug("Checking address pool...")
+    net = context['network']
+    pool = net.address_pool
+    old = context['old']
+    queue = context['queue']
+
+    diff = pool - old
+    if diff == set():
+        picked = [addr for addr in random.sample(pool, min(len(pool), 2)) if not net.is_connected(addr)]
+        queue.put(('connect_to_sampled', {
+            'picked': picked
+        }))
+    else:
+        context['old'] = copy.copy(pool)
 
 
 class Peer(Thread):
@@ -31,21 +52,31 @@ class Peer(Thread):
 
         self.queue = util.PollableQueue()
         self.selector = selectors.DefaultSelector()
-        self.selector.register(self.queue, selectors.EVENT_READ)
-        self.network = NetworkNode(self.selector)
+        self.cache = Cache()
+        self.index = Index()
+        self.network = NetworkNode(self.selector, self.cache)
         if first:
             self.paxos = PaxosNode(self.network)
+            paxos_header = '- This peer is now operating Paxos node %s' % self.paxos.node_id()
         else:
             self.paxos = None
             self.connect_to_paxos(addr)
-        self.index = Index()
+            paxos_header = '- This peer is not yet operating as a Paxos node.'
         self.last_keepalive = time.time()
         self.peer_keepalives = {}
         self._running = True
+        self.periodic_runner = PeriodicRunner()
+        self.periodic_runner.start()
+
+        naxos_header = '- Running Naxos v%s' % self.VERSION
+        net_header = '- This peer is listening for incoming connections on: %s:%s' % self.network.listen_addr
+        mid = '='*max(len(naxos_header), len(net_header), len(paxos_header))
+
+        print('\n'.join((mid, naxos_header, net_header, paxos_header, mid)))
+        self.selector.register(self.queue, selectors.EVENT_READ)
 
     def run(self):  # called by Thread.start()
-        """Main loop: Handles incoming connections and messages from other peers."""
-        print('Running Naxos Index Server v%s' % self.VERSION)
+        """Main loop: Handles incoming messages and commands sent from main thread."""
         try:
             while self._running:
                 events = self.selector.select(timeout=self.SELECT_TIMEOUT)
@@ -58,9 +89,12 @@ class Peer(Thread):
                         self.network.accept_incoming_connection()
                     else:
                         for msg in self.network.service_connection(key.fileobj, mask):
+                            self.cache.update_routing(key.fileobj.getpeername(), msg)
                             self.handle_message(key.fileobj, msg)
+                            self.cache.processed(key.fileobj.getpeername(), msg)
         finally:
-            print('Shutting down this peer...')
+            log.info('Shutting down this peer...')
+            self.periodic_runner.stop()
             self.network.reset()
 
     def check_keepalive_timeouts(self):
@@ -101,6 +135,23 @@ class Peer(Thread):
         cmd, payload = self.queue.get()
         if cmd == 'connect':
             self.network.connect_to_node(payload['addr'], 'paxos_join_request')
+            # TODO: add to self.paxos.peer_addresses
+        elif cmd == 'first_connection':
+            self.network.connect_to_node(payload['addr'])
+            self.network.broadcast({
+                'do': 'ping',
+            })
+            self.periodic_runner.register(watch_address_pool, {
+                'queue': self.queue,
+                'network': self.network,
+                'old': set(),
+            }, 3)
+        elif cmd == 'connect_to_sampled':
+            picked = payload['picked']
+            log.debug("picked: %s", picked)
+            for addr in picked:
+                self.network.connect_to_node(addr)
+            self.periodic_runner.unregister(watch_address_pool)
         elif cmd == 'start_paxos':
             if self.paxos is not None:
                 self.paxos.start_paxos_round(payload['value'])
@@ -111,9 +162,43 @@ class Peer(Thread):
         """Handles the Message msg, which arrived at the socket sock.
         The message might have been sent by another paxos peer or a client.
         """
-        print('[IN]:\t%s' % msg)
+        log.info('[IN]:\t%s' % msg)
+        if self.cache.seen(msg):
+            log.info("Skip handling message since it has already been handled.")
+            return
 
         cmd = msg['do']
+        to = msg['to']
+
+        # forward messages that are not for this peer.
+        # if it is a broadcast, cmd handling should call broadcast.
+        if to not in (self.network.unique_id_from_own_addr(), 'broadcast'):
+            log.info("Forward message")
+            self.network.send(to, msg)
+            return
+
+        # ping broadcast to discover peers in the network
+        if cmd == 'ping':
+            self.network.send(msg['from'], {
+                'do': 'ping_response',
+                'addr': self.network.listen_addr,
+            })
+            self.network.broadcast(msg, sock)
+
+        # response to a ping broadcast to the one who initially sent the ping, delivering own addr
+        elif cmd == 'ping_response':
+            # has to be for this peer, since it would have been forwardet otherwise.
+            self.network.address_pool.add(tuple(msg['addr']))  # remember this addr
+
+        # broadcast to analyze the overlay structure
+        elif cmd == 'discover_overlay':
+            self.network.send(msg['from'], {
+                'do': 'discover_overlay_response',
+                'neighbours': [conn.get_identifier() for conn in self.network.connections.values()
+                               if not conn.is_client()]
+            })
+            self.network.broadcast(msg, sock)
+
         if cmd == 'paxos_join_confirm':
             self.paxos = PaxosNode(self.network, msg['leader'])
             self.paxos.add_peer_addr(msg['my_node_id'], sock.getpeername())
@@ -127,10 +212,10 @@ class Peer(Thread):
 
         elif self.paxos is None:  # do not handle other Messages if not yet part of paxos
             if self.network.connections:
-                self.network.send(sock.getpeername(), Message({
+                self.network.send(sock.getpeername(), {
                     'do': 'try_other_peer',
                     'addr': self.network.get_random_listen_addr(),
-                }))
+                })
 
         elif cmd == 'hello':
             self.network.set_remote_listen_addr(sock, tuple(msg['listen_addr']))
@@ -153,15 +238,15 @@ class Peer(Thread):
         elif cmd == 'paxos_relay':
             self.paxos.start_paxos_round(msg['value'])
         elif cmd == 'paxos_prepare':
-            self.paxos.handle_prepare(sock.getpeername(), tuple(msg['id']))
+            self.paxos.handle_prepare(sock.getpeername(), tuple(msg['proposal_id']))
         elif cmd == 'paxos_promise':
-            self.paxos.handle_promise(tuple(msg['id']), msg['acc_id'],
+            self.paxos.handle_promise(tuple(msg['proposal_id']), msg['acc_id'],
                                       msg['accepted'], msg['majority'])
         elif cmd == 'paxos_propose':
             self.paxos.handle_propose(sock.getpeername(),
-                                      tuple(msg['id']), msg['index'], msg['value'])
+                                      tuple(msg['proposal_id']), msg['index'], msg['value'])
         elif cmd == 'paxos_accept':
-            index, chosen_value = self.paxos.handle_accept(tuple(msg['id']), msg['index'])
+            index, chosen_value = self.paxos.handle_accept(tuple(msg['proposal_id']), msg['index'])
             if chosen_value is not None:
                 self.update_paxos_log_and_apply_value(index)
         elif cmd == 'paxos_learn':  # TODO: handle duplicate learns
@@ -260,13 +345,32 @@ class Peer(Thread):
             'peers': peers,
         })
 
+    def connect(self, addr):
+        self.queue.put(('first_connection', {
+            'addr': addr,
+        }))
+
 
 if __name__ == '__main__':
     NUM_ARGS = len(sys.argv)
     if NUM_ARGS not in [1, 3]:
         sys.exit('Usage: python peer.py (ip port)')
 
-    log.basicConfig(level=log.DEBUG, filename='debug.log')
+    log.basicConfig(level=log.DEBUG,
+                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                    datefmt='%m-%d %H:%M',
+                    filename='debug.log',
+                    filemode='w')
+    # define a Handler which writes INFO messages or higher to the sys.stderr
+    console = log.StreamHandler()
+    console.setLevel(log.INFO)
+    # set a format which is simpler for console use
+    formatter = log.Formatter('%(asctime)s %(message)s\n', '%H:%M')
+    # tell the handler to use this format
+    console.setFormatter(formatter)
+    # add the handler to the root logger
+    log.getLogger('').addHandler(console)
+
     if NUM_ARGS == 1:
         peer = Peer()
     elif NUM_ARGS == 3:

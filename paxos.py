@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Paxos distributed consensus protocol, currently only Single-Paxos w/o leader."""
 
+import logging as log
+
 
 class PaxosNode:
     """Maintains paxos state.
@@ -9,7 +11,7 @@ class PaxosNode:
     def __init__(self, network_node, leader=None):
         """Initializes a new paxos node."""
         node_id = network_node.unique_id_from_own_addr()
-        print('This peer is now operating Paxos node', node_id)
+        #log.debug('Paxos group size is %s', num_peers)
         self.network_node = network_node
         self.peer_addresses = {}  # map node_id -> remote socket addr
         if leader is None:
@@ -36,7 +38,7 @@ class PaxosNode:
         print(self.peer_addresses)
         self.network_node.broadcast({
             'do': 'paxos_prepare',
-            'id': self.current_id,
+            'proposal_id': self.current_id,
         })
 
     def start_paxos_round(self, value):
@@ -49,7 +51,7 @@ class PaxosNode:
             # self.current_id = (self.current_id[0] + 1, self.current_id[1])
             self.network_node.broadcast({
                 'do': 'paxos_propose',
-                'id': self.current_id,
+                'proposal_id': self.current_id,
                 'index': len(self.log),
                 'value': value
             })
@@ -64,7 +66,7 @@ class PaxosNode:
     def handle_prepare(self, src, proposal_id):
         """Handles a paxos prepare message."""
         if proposal_id < self.highest_promised:
-            print('Rejecting Prepare: proposal_id < highest_promised')
+            log.info('Rejecting Prepare: proposal_id < highest_promised')
             return
         self.highest_promised = proposal_id
         try:
@@ -74,7 +76,7 @@ class PaxosNode:
             majority = self.group_sizes[-1]
         self.network_node.send(src, {
             'do': 'paxos_promise',
-            'id': proposal_id,
+            'proposal_id': proposal_id,
             'acc_id': self.current_id,
             'accepted': self.log,
             'majority': majority,
@@ -84,7 +86,7 @@ class PaxosNode:
     def handle_promise(self, proposal_id, acc_id, value, majority):
         """Handle a paxos promise message."""
         if proposal_id != self.current_id:
-            print('Rejecting Promise: proposal_id != current_id')
+            log.info('Rejecting Promise: proposal_id != current_id')
             return
         self.promises += 1
         if self.highest_numbered_proposal is None or acc_id > self.highest_numbered_proposal:
@@ -96,7 +98,7 @@ class PaxosNode:
     def handle_propose(self, src, proposal_id, index, value):
         """Handles a paxos propose message."""
         if proposal_id < self.highest_promised:
-            print('Rejecting Proposal: proposal_id < highest_promised')
+            log.info('Rejecting Proposal: proposal_id < highest_promised')
             return
         while len(self.log) <= index:
             self.log.append(None)
@@ -104,14 +106,14 @@ class PaxosNode:
         # self.accepted_id = proposal_id  #???
         self.network_node.send(src, {
             'do': 'paxos_accept',
-            'id': proposal_id,
+            'proposal_id': proposal_id,
             'index': index,
         })
 
     def handle_accept(self, proposal_id, index):
         """Handles a paxos accept message."""
         if proposal_id != self.current_id:
-            print('Rejecting Accept: proposal_id != current_id')
+            log.info('Rejecting Accept: proposal_id != current_id')
             return -1, None
         self.acceptances[index] += 1
         if self.acceptances[index] == self.majority(index):
