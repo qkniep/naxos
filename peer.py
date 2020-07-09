@@ -90,7 +90,7 @@ class Peer(Thread):
                     else:
                         for msg in self.network.service_connection(key.fileobj, mask):
                             self.cache.update_routing(key.fileobj.getpeername(), msg)
-                            self.handle_message(key.fileobj, msg)
+                            self.handle_message(self.network.get_connection(tuple(key.file)), msg)
                             self.cache.processed(key.fileobj.getpeername(), msg)
         finally:
             log.info('Shutting down this peer...')
@@ -158,7 +158,7 @@ class Peer(Thread):
         else:
             raise ValueError('Unknown command: %s' % cmd)
 
-    def handle_message(self, sock, msg):
+    def handle_message(self, conn, msg):
         """Handles the Message msg, which arrived at the socket sock.
         The message might have been sent by another paxos peer or a client.
         """
@@ -167,6 +167,7 @@ class Peer(Thread):
             log.info("Skip handling message since it has already been handled.")
             return
 
+        sock = conn.sock
         cmd = msg['do']
         to = msg['to']
 
@@ -261,7 +262,7 @@ class Peer(Thread):
             })
 
         elif cmd == 'index_search':
-            self.network.send(sock.getpeername(), {
+            self.network.send(util.identifier(*sock.getpeername()), {
                 'do': 'index_search_result',
                 'query': msg['filename'],  # in case of multiple searches, out of order...
                 'addr': self.index.search_entry(msg['filename']),

@@ -215,6 +215,9 @@ class NetworkNode:
     def is_connected(self, addr):
         return addr in self.connections
 
+    def get_connection(self, addr):
+        return self.connections[addr]
+
 def create_listening_socket(host, port=0):
     """Create a new listening socket on this node.
     Select a free port if port is not explicitly set or already taken.
