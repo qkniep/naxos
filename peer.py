@@ -275,7 +275,7 @@ class Peer(Thread):
                     'addr': addr,
                 })
         elif cmd == 'index_remove':
-            if self.paxos.group_sizes[len(self.paxos.log)] == 1:
+            if self.paxos.group_sizes[self.paxos.get_last_applied_value_index()] == 1:
                 self.index.remove_entry(msg['filename'])
             else:
                 self.run_paxos({
