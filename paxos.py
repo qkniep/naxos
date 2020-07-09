@@ -11,15 +11,14 @@ class PaxosNode:
     def __init__(self, network_node, leader=None):
         """Initializes a new paxos node."""
         node_id = network_node.unique_id_from_own_addr()
-        #log.debug('Paxos group size is %s', num_peers)
+        # log.debug('Paxos group size is %s', num_peers)
         self.network_node = network_node
-        self.peer_addresses = {}  # map node_id -> remote socket addr
         if leader is None:
             self.group_sizes = [1]
         else:
             self.group_sizes = [2]
         if leader is None:
-            self.current_leader = (node_id, self.network_node.listen_addr)  # XXX: leader addr is listen address
+            self.current_leader = node_id
         else:
             self.current_leader = leader
         self.current_id = (0, node_id)
@@ -34,8 +33,6 @@ class PaxosNode:
         """Tries to become the new leader through Prepare/Promise."""
         self.current_id = (self.current_id[0] + 1, self.node_id())
         self.promises = 1
-        print(self.network_node.connections)
-        print(self.peer_addresses)
         self.network_node.broadcast({
             'do': 'paxos_prepare',
             'proposal_id': self.current_id,
@@ -47,7 +44,7 @@ class PaxosNode:
         Relays the value to the leader or sends the prepare if we are leader.
         Ultimately we try to get value chosen.
         """
-        if self.current_leader[0] == self.node_id():
+        if self.current_leader == self.node_id():
             # self.current_id = (self.current_id[0] + 1, self.current_id[1])
             self.network_node.broadcast({
                 'do': 'paxos_propose',
@@ -58,7 +55,7 @@ class PaxosNode:
             self.log.append(value)
             self.acceptances.append(1)
         else:
-            self.network_node.send(self.peer_addresses[self.current_leader[0]], {
+            self.network_node.send(self.current_leader, {
                 'do': 'paxos_relay',
                 'value': value,
             })
@@ -69,7 +66,7 @@ class PaxosNode:
             log.info('Rejecting Prepare: proposal_id < highest_promised')
             return
         self.highest_promised = proposal_id
-        majority = self.majority[self.get_last_applied_value_index()]
+        majority = self.majority(self.get_last_applied_value_index())
         self.network_node.send(src, {
             'do': 'paxos_promise',
             'proposal_id': proposal_id,
@@ -77,7 +74,7 @@ class PaxosNode:
             'accepted': self.log,
             'majority': majority,
         })
-        self.current_leader = (proposal_id[1], self.peer_addresses[proposal_id[1]])
+        self.current_leader = proposal_id[1]
 
     def handle_promise(self, proposal_id, acc_id, value, majority):
         """Handle a paxos promise message."""
@@ -89,7 +86,7 @@ class PaxosNode:
             self.log = value
             self.highest_numbered_proposal = acc_id
         if self.promises == majority:
-            self.current_leader = (self.node_id(), self.network_node.listen_addr)
+            self.current_leader = self.node_id()
 
     def handle_propose(self, src, proposal_id, index, value):
         """Handles a paxos propose message."""
@@ -138,20 +135,15 @@ class PaxosNode:
         for i in range(index+1):
             if not self.chosen[i]:
                 up_to_date = False
-                self.network_node.send(self.peer_addresses[self.current_leader[0]], {
+                self.network_node.send(self.current_leader, {
                     'do': 'paxos_fill_log_hole',
                     'index': i,
                 })
         return up_to_date
 
-    def add_peer_addr(self, node_id, addr):
-        """Adds a mapping (node ID -> address) to this peer's list of such mappings."""
-        if self.peer_addresses.get(node_id) is None:
-            self.peer_addresses[node_id] = addr
-
     def is_leader(self):
         """Returns whether this paxos node thinks itself to be the leader."""
-        return self.current_leader[0] == self.node_id()
+        return self.current_leader == self.node_id()
 
     def get_last_applied_value_index(self):
         try:

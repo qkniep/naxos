@@ -90,7 +90,7 @@ class Peer(Thread):
                     else:
                         for msg in self.network.service_connection(key.fileobj, mask):
                             self.cache.update_routing(key.fileobj.getpeername(), msg)
-                            self.handle_message(self.network.get_connection(tuple(key.file)), msg)
+                            self.handle_message(self.network.get_connection(key.fileobj.getpeername()), msg)
                             self.cache.processed(key.fileobj.getpeername(), msg)
         finally:
             log.info('Shutting down this peer...')
@@ -100,7 +100,7 @@ class Peer(Thread):
     def check_keepalive_timeouts(self):
         """Check if any peer timed out long enough to assume they are offline."""
         current_time = time.time()
-        leader_id = self.paxos.current_leader[0]
+        leader_id = self.paxos.current_leader
         if self.paxos.is_leader():
             for (node_id, last_keepalive) in self.peer_keepalives.items():
                 if current_time - last_keepalive > 3 * self.KEEPALIVE_TIMEOUT:
@@ -120,7 +120,7 @@ class Peer(Thread):
                 self.network.broadcast({'do': 'keepalive', 'node_id': self.paxos.node_id()})
             else:
                 try:
-                    self.network.send(self.paxos.peer_addresses[self.paxos.current_leader[0]],
+                    self.network.send(leader_id,
                                       {'do': 'keepalive', 'node_id': self.paxos.node_id()})
                 except KeyError:
                     print('LEADER CONNECTION BROKE')
@@ -170,6 +170,7 @@ class Peer(Thread):
         sock = conn.sock
         cmd = msg['do']
         to = msg['to']
+        src = msg['from']
 
         # forward messages that are not for this peer.
         # if it is a broadcast, cmd handling should call broadcast.
@@ -180,7 +181,7 @@ class Peer(Thread):
 
         # ping broadcast to discover peers in the network
         if cmd == 'ping':
-            self.network.send(msg['from'], {
+            self.network.send(src, {
                 'do': 'ping_response',
                 'addr': self.network.listen_addr,
             })
@@ -193,7 +194,7 @@ class Peer(Thread):
 
         # broadcast to analyze the overlay structure
         elif cmd == 'discover_overlay':
-            self.network.send(msg['from'], {
+            self.network.send(src, {
                 'do': 'discover_overlay_response',
                 'neighbours': [conn.get_identifier() for conn in self.network.connections.values()
                                if not conn.is_client()]
@@ -202,17 +203,12 @@ class Peer(Thread):
 
         if cmd == 'paxos_join_confirm':
             self.paxos = PaxosNode(self.network, msg['leader'])
-            self.paxos.add_peer_addr(msg['my_node_id'], sock.getpeername())
-            peers = [tuple(p) for p in msg['peers']]
-            for node_id, listen_addr in peers:
-                addr = self.network.connect_to_node(tuple(listen_addr))
-                self.paxos.add_peer_addr(node_id, addr)
-            self.network.send(self.paxos.peer_addresses[self.paxos.current_leader[0]],
+            self.network.send(self.paxos.current_leader,
                               {'do': 'keepalive', 'node_id': self.paxos.node_id()})
 
         elif self.paxos is None:  # do not handle other Messages if not yet part of paxos
             if self.network.connections:
-                self.network.send(sock.getpeername(), {
+                self.network.send(src, {
                     'do': 'try_other_peer',
                     'addr': self.network.get_random_listen_addr(),
                 })
@@ -229,23 +225,22 @@ class Peer(Thread):
             index = self.paxos.get_last_applied_value_index()
             if self.paxos.group_sizes[index] == 1:
                 self.paxos.group_sizes[index] += 1
-                self.send_paxos_join_confirmation(sock.getpeername())
+                self.send_paxos_join_confirmation(src)
             else:
                 self.run_paxos({
                     'change': 'join',
-                    'respond_addr': sock.getpeername(),
+                    'node_id': src,
                     'listen_addr': tuple(msg['listen_addr']),
                 })
         elif cmd == 'paxos_relay':
             self.paxos.start_paxos_round(msg['value'])
         elif cmd == 'paxos_prepare':
-            self.paxos.handle_prepare(sock.getpeername(), tuple(msg['proposal_id']))
+            self.paxos.handle_prepare(src, tuple(msg['proposal_id']))
         elif cmd == 'paxos_promise':
             self.paxos.handle_promise(tuple(msg['proposal_id']), msg['acc_id'],
                                       msg['accepted'], msg['majority'])
         elif cmd == 'paxos_propose':
-            self.paxos.handle_propose(sock.getpeername(),
-                                      tuple(msg['proposal_id']), msg['index'], msg['value'])
+            self.paxos.handle_propose(src, tuple(msg['proposal_id']), msg['index'], msg['value'])
         elif cmd == 'paxos_accept':
             index, chosen_value = self.paxos.handle_accept(tuple(msg['proposal_id']), msg['index'])
             if chosen_value is not None:
@@ -255,14 +250,14 @@ class Peer(Thread):
                 self.paxos.handle_learn(msg['index'], msg['value'])
                 self.update_paxos_log_and_apply_value(msg['index'])
         elif cmd == 'paxos_fill_log_hole':
-            self.network.send(sock.getpeername(), {
+            self.network.send(src, {
                 'do': 'paxos_learn',
                 'index': msg['index'],
                 'value': self.paxos.log[msg['index']],
             })
 
         elif cmd == 'index_search':
-            self.network.send(util.identifier(*sock.getpeername()), {
+            self.network.send(src, {
                 'do': 'index_search_result',
                 'query': msg['filename'],  # in case of multiple searches, out of order...
                 'addr': self.index.search_entry(msg['filename']),
@@ -321,11 +316,9 @@ class Peer(Thread):
             self.paxos.group_sizes.append(self.paxos.group_sizes[index])
 
         if value['change'] == 'join':
-            conn_addresses = [c.sock.getpeername() for c in self.network.connections.values()]
-            if tuple(value['respond_addr']) in conn_addresses:
-                self.send_paxos_join_confirmation(tuple(value['respond_addr']))
+            if self.paxos.is_leader():
+                self.send_paxos_join_confirmation(value['node_id'])
         elif value['change'] == 'leave':
-            self.paxos.peer_addresses.pop(value['node_id'], None)
             if self.paxos.is_leader():
                 self.peer_keepalives.pop(value['node_id'], None)
             # TODO: close gnutella connections
@@ -334,17 +327,14 @@ class Peer(Thread):
         elif value['change'] == 'remove':
             self.index.remove_entry(value['entry'])
 
-    def send_paxos_join_confirmation(self, addr):
+    def send_paxos_join_confirmation(self, node_id):
         """Sends a confirmation for joining the paxos overlay network to addr.
         All necessary information about the curent state of paxos is included.
         """
-        peers = [(n, self.network.connections[a].remote_listen_addr)
-                 for n, a in self.paxos.peer_addresses.items() if a != addr]
-        self.network.send(addr, {
+        self.network.send(node_id, {
             'do': 'paxos_join_confirm',
             'my_node_id': self.paxos.node_id(),
             'leader': self.paxos.current_leader,
-            'peers': peers,
         })
 
     def connect(self, addr):
