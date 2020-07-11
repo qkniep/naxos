@@ -2,8 +2,10 @@
 """Utility functions for working with Base64 encoding and providing non-POSIX system support."""
 
 import base64
+import ipaddress
 import os
 import queue
+import re
 import socket
 import struct
 
@@ -24,6 +26,16 @@ def identifier(host, port):
     """Deterministically generates a single integer ID from address."""
     ip_int = struct.unpack("!I", socket.inet_aton(host))[0]
     return ip_int * 65536 + port
+
+
+def is_public_ip(ip_addr):
+    pattern = r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$'  # ipv4
+    if not re.match(pattern, ip_addr):
+        return 'Ip is not a well formed IPv4 address.'
+    if ipaddress.IPv4Address(ip_addr).is_private:
+        return 'Connecting to a local ip address is not allowed. Use the address printed when starting the peer you want to connect to.'
+    return True
+
 
 
 class PollableQueue(queue.Queue):

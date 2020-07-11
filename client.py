@@ -342,9 +342,9 @@ def parse_config(argv):
             sys.exit(0)
 
     # sanity checks
-    pattern = r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$'  # ipv4
-    if not re.match(pattern, host):
-        sys.exit('host ip is not a well formed IPv4 address.')
+    ret = util.is_public_ip(host)  # returns True or str
+    if not ret is True:
+        sys.exit(ret)
     if not naxos_path.is_dir():
         sys.exit('provided naxos directory is not a directory.')
     if not port.isdigit():

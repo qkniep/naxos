@@ -366,10 +366,9 @@ if __name__ == '__main__':
         try:
             host, port = sys.argv[1].split(':')
             pattern = r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$'  # ipv4
-            if not re.match(pattern, host):
-                sys.exit('Ip is not a well formed IPv4 address.')
-            if ipaddress.IPv4Address(host).is_private:
-                sys.exit('Connecting to a local ip address is not allowed. Use the address printed when starting the peer you want to connect to.')
+            ret = util.is_public_ip(host)  # returns True or str
+            if not ret is True:
+                sys.exit(ret)
         except (IndexError, ValueError):
             sys.exit('Usage: python peer.py (ip:port)')
         peer = Peer(False, (host, int(port)))
