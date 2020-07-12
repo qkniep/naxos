@@ -6,7 +6,9 @@
 * Python >= 3.7
 * miniupnpc == 2.1 [^1]
 
-## Getting Started
+## Starting a Naxos Overlay
+
+> :warning: **Since 2 peers is a weird corner case (and nothing interesting happens with just one peer), we suggest to construct a network of at least 3 peers.**
 
 To start a new Naxos overlay network as the first index server:
 ```
@@ -35,6 +37,12 @@ host_ip=<ip>
 host_port=<port>
 naxos_directory=<path>
 ```
+
+The client supports the following commands:
+* `> search <filename>`: Search the index for a filename, cache the result
+* `> download <filename>`: Download a file from the cached address. *Note: Due to the implementation of the client it is not trivial to automatically search for a file before downloading, so you need to search for a file, before you can download it.*
+* `> overlay`: Ping into the network and construct a visualization of the overlay. Returns a shortened link.
+* `> quit|exit`: Exit the client.
 
 
 [^1]: Should installation via pip fail (happened to us on Windows), use the .whl from [here](https://ci.appveyor.com/project/miniupnp/miniupnp) for your environment.
