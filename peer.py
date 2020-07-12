@@ -94,6 +94,7 @@ class Peer(Thread):
                             self.cache.update_routing(key.fileobj.getpeername(), msg)
                             self.handle_message(self.network.get_connection(key.fileobj.getpeername()), msg)
                             self.cache.processed(key.fileobj.getpeername(), msg)
+                time.sleep(0.0001)  # performance
         finally:
             log.info('Shutting down this peer...')
             self.periodic_runner.stop()
