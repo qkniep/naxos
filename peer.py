@@ -37,6 +37,12 @@ def watch_address_pool(context: dict):
         context['old'] = copy.copy(pool)
 
 
+def ping(context: dict):
+    queue = context['queue']
+    queue.put(('still_alive', {}))
+
+
+
 class Peer(Thread):
     """Overlay network peer maintaining a network node, paxos instances, and an index.
     Serves as an index server to the clients.
@@ -76,6 +82,10 @@ class Peer(Thread):
 
         print('\n'.join((mid, naxos_header, net_header, paxos_header, mid)))
         self.selector.register(self.queue, selectors.EVENT_READ)
+
+        self.periodic_runner.register(ping, {
+            'queue': self.queue
+        }, 0.5)
 
     def run(self):  # called by Thread.start()
         """Main loop: Handles incoming messages and commands sent from main thread."""
@@ -144,6 +154,10 @@ class Peer(Thread):
                 'network': self.network,
                 'old': set(),
             }, 0.5)
+        elif cmd == 'still_alive':
+            self.network.broadcast({
+                'do': 'still_alive'
+            })
         elif cmd == 'connect_to_sampled':
             picked = payload['picked']
             log.debug("picked: %s", picked)
@@ -183,6 +197,8 @@ class Peer(Thread):
                 'do': 'ping_response',
                 'addr': self.network.listen_addr,
             })
+            self.network.broadcast(msg, sock)
+        elif cmd == 'still_alive':
             self.network.broadcast(msg, sock)
 
         # response to a ping broadcast to the one who initially sent the ping, delivering own addr
